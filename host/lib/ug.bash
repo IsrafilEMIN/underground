@@ -290,10 +290,10 @@ ug_sha256() {
 ug_check_checkout() {
   local src=$1 tool=$2 head main dirty
   dirty=$(git --no-optional-locks -c "safe.directory=$src" -C "$src" status --porcelain 2>/dev/null) || { printf '%s: %s is not a git checkout\n' "$tool" "$src" >&2; return 1; }
-  [[ -z $dirty ]] || { printf '%s: the checkout %s has changes that are not committed; setup installs only what CI proved on origin/main\n' "$tool" "$src" >&2; return 1; }
+  [[ -z $dirty ]] || { printf '%s: the checkout %s has changes that are not committed; setup installs only origin/main\n' "$tool" "$src" >&2; return 1; }
   head=$(git --no-optional-locks -c "safe.directory=$src" -C "$src" rev-parse HEAD)
   main=$(git --no-optional-locks -c "safe.directory=$src" -C "$src" rev-parse --verify --quiet origin/main) || { printf '%s: the checkout has no origin/main; fetch first\n' "$tool" >&2; return 1; }
-  [[ $head == "$main" ]] || { printf '%s: the checkout is at %s, not origin/main %s; setup installs only what CI proved on origin/main. Check out main and pull, or fetch.\n' "$tool" "${head:0:7}" "${main:0:7}" >&2; return 1; }
+  [[ $head == "$main" ]] || { printf '%s: the checkout is at %s, not origin/main %s; setup installs only origin/main. Check out main and pull, or fetch.\n' "$tool" "${head:0:7}" "${main:0:7}" >&2; return 1; }
 }
 
 ug_pull_main() {
@@ -339,9 +339,6 @@ def rule(t): [.rules[]? | select(.type == t)][0];
       else "its pull request rule needs 1 approval, review from code owners, approval of the most recent push, and dismissal of stale approvals" end),
   (if rule("non_fast_forward") then empty else "it does not block force pushes" end),
   (if rule("deletion") then empty else "it does not restrict deletions" end),
-  ((rule("required_status_checks").parameters.required_status_checks // []) as $checks
-    | (("checks", "tests") as $job | if ($checks | any(.context == $job and .integration_id == 15368)) then empty else "it does not require the check \($job) from GitHub Actions" end),
-      (if ($checks | all(.integration_id == 15368)) then empty else "it requires a status check from an app other than GitHub Actions" end)),
   (if .bypass_actors == null then "its bypass list is not readable with your login"
     else (.bypass_actors[] | select(((.actor_type == "RepositoryRole" and .actor_id == 5) or .actor_type == "OrganizationAdmin") | not) | "its bypass list holds \(.actor_type) \(.actor_id)") end)
 ] | join("; ")

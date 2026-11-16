@@ -31,8 +31,7 @@ import type {
 import { appFiles, basicAuth, createAppTokens, redactTokens } from "./github-app.ts";
 import { readHostFacts } from "./facts.ts";
 import type { GithubTokens, TokenScope } from "./github-app.ts";
-import { dropPushRecord, listPushRecords, readPushRecord, writePushRecord } from "./push-record.ts";
-import type { PushedBranch } from "./push-record.ts";
+import { readPushRecord, writePushRecord } from "./push-record.ts";
 
 export type ServerConfig = {
   socketPath: string;
@@ -281,12 +280,6 @@ async function refreshMain(config: ServerConfig, repo: string, bare: string, sig
   return { branch: remote.branch };
 }
 
-type BranchEnd =
-  | { kind: "deleted"; branch: string }
-  | { kind: "gone"; branch: string }
-  | { kind: "moved"; branch: string; merged: string; sha: string }
-  | { kind: "failed"; branch: string; detail: string };
-
 async function remoteBranchHead(config: ServerConfig, bare: string, repo: string, ref: string, signal: AbortSignal): Promise<{ sha: string | undefined } | ChildResult> {
   const listed = await gitRemote(config, bare, repo, "read", (url) => ["ls-remote", url, ref], signal, "contents-read");
   if (listed.exit !== 0) return listed;
@@ -294,60 +287,13 @@ async function remoteBranchHead(config: ServerConfig, bare: string, repo: string
   return { sha: line?.slice(0, line.indexOf("\t")) };
 }
 
-async function endMergedBranch(config: ServerConfig, bare: string, base: string, pushed: PushedBranch, signal: AbortSignal): Promise<BranchEnd | undefined> {
-  const inMain = await git(config, bare, ["merge-base", "--is-ancestor", pushed.sha, `refs/heads/${base}`], signal);
-  if (inMain.exit !== 0) return undefined;
-  const ref = `refs/heads/${pushed.branch}`;
-  const head = await remoteBranchHead(config, bare, pushed.repo, ref, signal);
-  if ("exit" in head) return { kind: "failed", branch: pushed.branch, detail: head.stderr };
-  const remote = head.sha;
-  if (remote !== undefined && remote !== pushed.sha) return { kind: "moved", branch: pushed.branch, merged: pushed.sha, sha: remote };
-  let end: BranchEnd = { kind: "gone", branch: pushed.branch };
-  if (remote !== undefined) {
-    const push = await gitRemote(config, bare, pushed.repo, "write", (url) => ["push", "--porcelain", `--force-with-lease=${ref}:${pushed.sha}`, url, `:${ref}`], signal);
-    if (push.exit !== 0) return { kind: "failed", branch: pushed.branch, detail: push.stderr };
-    end = { kind: "deleted", branch: pushed.branch };
-  }
-  try {
-    await dropPushRecord(config.pushesDir, pushed, pushed.sha);
-  } catch (error) {
-    return { kind: "failed", branch: pushed.branch, detail: `cannot drop the push record: ${redactTokens(error instanceof Error ? error.message : String(error))}` };
-  }
-  return end;
-}
-
-function describeEnd(end: BranchEnd): string {
-  switch (end.kind) {
-    case "deleted":
-      return `gh-broker: deleted branch ${end.branch}\n`;
-    case "gone":
-      return `gh-broker: branch ${end.branch} is gone already\n`;
-    case "moved":
-      return `gh-broker: kept branch ${end.branch}: it moved from the merged commit ${end.merged} to ${end.sha}\n`;
-    case "failed":
-      return `gh-broker: cannot end branch ${end.branch} yet, the next check tries again: ${end.detail.trim()}\n`;
-    default: {
-      const _exhaustive: never = end;
-      return _exhaustive;
-    }
-  }
-}
-
-async function refreshRepo(config: ServerConfig, repo: string, signal: AbortSignal): Promise<{ ends: BranchEnd[] } | ResultReply> {
+async function refreshRepo(config: ServerConfig, repo: string, signal: AbortSignal): Promise<{ branch: string } | ResultReply> {
   const bare = join(config.reposRoot, `${repo}.git`);
   return inRepoQueue(config, repo, async () => {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(config.checkTimeoutMs ?? CHECK_TIMEOUT_MS)]);
     const initFailure = await ensureBareRepo(config, bare, bounded);
     if (initFailure !== undefined) return initFailure;
-    const main = await refreshMain(config, repo, bare, bounded);
-    if (!("branch" in main)) return main;
-    const ends: BranchEnd[] = [];
-    for (const pushed of await listPushRecords(config.pushesDir)) {
-      if (pushed.repo !== repo) continue;
-      const end = await endMergedBranch(config, bare, main.branch, pushed, bounded);
-      if (end !== undefined) ends.push(end);
-    }
-    return { ends };
+    return refreshMain(config, repo, bare, bounded);
   });
 }
 
@@ -383,25 +329,16 @@ async function writeRefreshStatus(config: ServerConfig, at: number, failed: stri
 export async function refreshRepos(config: ServerConfig, signal: AbortSignal): Promise<void> {
   const now = (config.now ?? Date.now)();
   const socketProbe = probeSocket(config.socketPath);
-  const recorded = new Set((await listPushRecords(config.pushesDir)).map((pushed) => pushed.repo));
-  for (const repo of recorded) repoState(config, repo);
-  const due = [...(repoStates.get(config) ?? [])].filter(([repo, state]) => {
-    if (state.refreshing === true) return false;
-    if (state.syncedAt !== undefined && now - state.syncedAt <= REFRESH_FOR_MS) return true;
-    return recorded.has(repo) && state.checkedAt === undefined;
-  });
+  const due = [...(repoStates.get(config) ?? [])].filter(([, state]) => state.refreshing !== true && state.syncedAt !== undefined && now - state.syncedAt <= REFRESH_FOR_MS);
   const failed: string[] = [];
   await Promise.all(
     due.map(async ([repo, state]) => {
       state.refreshing = true;
       try {
         const result = await refreshRepo(config, repo, signal);
-        if (!("ends" in result)) {
+        if (!("branch" in result)) {
           failed.push(repo);
           process.stderr.write(`${new Date().toISOString()} refresh of ${repo} failed: ${result.stderr.trim()}\n`);
-        } else {
-          if (result.ends.some((end) => end.kind === "failed")) failed.push(repo);
-          for (const end of result.ends) if (end.kind !== "moved") process.stderr.write(`${new Date().toISOString()} ${repo}: ${describeEnd(end)}`);
         }
       } catch (error) {
         failed.push(repo);
@@ -533,7 +470,7 @@ async function handlePush(config: ServerConfig, req: PushRequest, signal: AbortS
           await writePushRecord(config.pushesDir, { repo: req.repo, branch: req.branch }, req.sha);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return { ...forward(push), exit: 1, stderr: `${push.stderr}gh-broker: pushed, but cannot write the push record, so the branch cleanup will not delete this branch after its merge: ${redactTokens(message)}\n` };
+          return { ...forward(push), exit: 1, stderr: `${push.stderr}gh-broker: pushed, but cannot write the push record, so the gh-broker will refuse a later push that does not hold this commit: ${redactTokens(message)}\n` };
         }
         return forward(push);
       } finally {

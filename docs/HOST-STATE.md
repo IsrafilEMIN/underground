@@ -4,7 +4,7 @@ This page lists each file outside the repo that underground reads or writes on t
 
 Most changes take effect only when you run `host/bin/ug-setup`. Setup copies your files into root-owned snapshots. The services and sessions read only those snapshots.
 
-Setup first asks GitHub, with your `gh` login, whether `main` of the checkout's repo needs your approval for every merge. If not, it stops before it pulls (`ug_check_main_rule`, `host/lib/ug.bash`; `docs/adr/0021-github-holds-the-wall-on-main.md`). So setup needs `gh` with your login, `jq`, and a reply from GitHub.
+Setup first asks GitHub, with your `gh` login, whether `main` of the checkout's repo needs your approval for every merge. If not, it stops before it pulls (`ug_check_main_rule`, `host/lib/ug.bash`). So setup needs `gh` with your login, `jq`, and a reply from GitHub.
 
 ## Where data moves
 
@@ -42,7 +42,7 @@ No code makes these files. Setup or the service reads them as they are.
 | `skill-repos` in the config repo | One skill repo path on each line (`skill-repos`, `host/bin/ug-agent-setup`). | If a path is not a folder or is outside your home, setup stops (`skill-repos`, `host/bin/ug-agent-setup`). |
 | `owner_data/backup/config` | The lines `repo=sftp:<user>@<host>:<path>`, `wake=` and `sleep=` (`backup_target_read`, `host/lib/backup-target.bash`). | Setup gives only a warning (`setup_backup`, `host/bin/ug-setup`). The nightly backup then fails, and only `backup/backup.log` records it. |
 
-| `owner_data/watch/ping` | One `https://` line: the ping address of a check on an outside service (`ping_file`, `host/bin/ug-watch`; `docs/adr/0023-failures-reach-the-owner.md`). It is a secret: anyone with it can send "ok". | Setup lists it as left to do (`prepare_services`, `host/bin/ug-setup`). The watch still runs, but nothing outside the mac alerts you, and each launch warns about it. |
+| `owner_data/watch/ping` | One `https://` line: the ping address of a check on an outside service (`ping_file`, `host/bin/ug-watch`). It is a secret: anyone with it can send "ok". | Setup lists it as left to do (`prepare_services`, `host/bin/ug-setup`). The watch still runs, but nothing outside the mac alerts you, and each launch warns about it. |
 
 ## Data folder: `owner_data` (yours, mode 700)
 
@@ -64,7 +64,7 @@ Nothing reads `protected-paths/` any more; you may delete it.
 
 ## Root folder: `root` (root-owned)
 
-Setup builds `code/` fresh from the checkout at each run, swaps it in, and at its end deletes each entry at the top of `root` that it does not make (`code.new` and `ssh_host_ed25519_key.pub`, `host/bin/ug-agent-setup`; `docs/adr/0024-state-over-incident-lists.md`).
+Setup builds `code/` fresh from the checkout at each run, swaps it in, and at its end deletes each entry at the top of `root` that it does not make (`code.new` and `ssh_host_ed25519_key.pub`, `host/bin/ug-agent-setup`).
 
 | path | what it is for | who writes it | who reads it |
 |---|---|---|---|
@@ -74,7 +74,7 @@ Setup builds `code/` fresh from the checkout at each run, swaps it in, and at it
 | `code/bin/omp`, `code/bin/gh-broker`, `code/gh-broker/*.ts` | The link to the pinned omp, the gh-broker client for the agent, and the usage broker code, which the pinned omp runs | `code.new`, `host/bin/ug-agent-setup` | `omp_bin` and `gh-broker`, `host/agent/agent-start`; `sync_clone`, `host/agent/agent-refresh`; the usage broker service |
 | `code/bin/agent-home-tar` | The backup helper. It runs as the agent user, not as root. | `code.new`, `host/bin/ug-agent-setup` | `agent_tar`, `host/bin/ug-backup`, through `sudo -n -u <agent_user>` and `/etc/sudoers.d/underground-backup` (System files) |
 | `code/pin.sb`, `code/agent-session`, `code/agent-start`, `code/agent-refresh`, `code/sshd_config`, `code/authorized_keys/ugagent`, `ssh_host_ed25519_key` | The agent login, its sandbox, and the clone refresh. Setup makes the host key once. | `code.new` and `ssh-keygen`, `host/bin/ug-agent-setup` | the agent sshd, `sandbox-exec`, `host/agent/agent-session`, and the refresh service |
-| `code/pf.conf`, `code/pf-load` | The firewall line that refuses the agent user as the listener on the auth broker's port (`auth_broker_port`), and its loader (`docs/adr/0022-loopback-one-firewall-line.md`) | `code.new`, `host/bin/ug-agent-setup` | the firewall service in `host/services`, at load and every 30 s (`StartInterval`, `host/agent/com.underground.agent-pf.plist`) |
+| `code/pf.conf`, `code/pf-load` | The firewall line that refuses the agent user as the listener on the auth broker's port (`auth_broker_port`), and its loader | `code.new`, `host/bin/ug-agent-setup` | the firewall service in `host/services`, at load and every 30 s (`StartInterval`, `host/agent/com.underground.agent-pf.plist`) |
 | `gh/<pin>/gh` | The pinned gh that the gh-broker runs, `root:wheel` mode 555. Its path is a program argument of the gh-broker job, so the trust check covers it. | `gh_bin`, `host/bin/ug-agent-setup` | the gh-broker (`ghPath`, `host/gh-broker/server.ts`) |
 | `run/` | The folder of the gh-broker socket and status. The gh-broker user owns it, group `agent_group`, mode 711. Root writes nothing in it: the agent sshd keeps no pid file (`PidFile`, `host/agent/sshd_config`). | `710`, `host/bin/ug-agent-setup` | the gh-broker and its client |
 | `run/gh-broker.sock` | The gh-broker socket, mode 660 (`gh_broker_socket`, `host/facts`). It gets the group of its folder, so only the agent user can connect. | the gh-broker (`listenUnix`, `socketPath`, `host/gh-broker/server.ts`) | the agent's gh-broker client |
@@ -86,7 +86,7 @@ Setup builds `code/` fresh from the checkout at each run, swaps it in, and at it
 | path | what it is for | who writes it | when a change takes effect |
 |---|---|---|---|
 | `.omp/` (omp's default profile) | The model logins and API keys | omp, through `ug-auth login` and `ug-auth key` (`UG_KEY_NAME`, `host/bin/ug-auth`), and the auth broker, through `ug-auth revoke` (`revoke`, `host/bin/ug-auth`) | at once, in the auth broker |
-| `.omp/auth-gateway.token` | The bearer for the auth gateway. Setup puts it into `models.yml`. The owner rotates it with `ug-auth auth-gateway token --regenerate`, which `host/bin/ug-auth` passes through to omp (`docs/adr/0005-model-auth-gateway.md`). | setup, if it is empty (`auth-gateway.token`, `host/bin/ug-agent-setup`), and the owner's rotation | Sessions get the bearer after the next setup (`gateway_token`, `host/bin/ug-agent-setup`). |
+| `.omp/auth-gateway.token` | The bearer for the auth gateway. Setup puts it into `models.yml`. The owner rotates it with `ug-auth auth-gateway token --regenerate`, which `host/bin/ug-auth` passes through to omp. | setup, if it is empty (`auth-gateway.token`, `host/bin/ug-agent-setup`), and the owner's rotation | Sessions get the bearer after the next setup (`gateway_token`, `host/bin/ug-agent-setup`). |
 | `.omp/auth-broker.token` | The bearer that the auth broker asks its clients for | omp, not this repo | Setup uses it only to look for leaks in the config (`auth-broker.token`, `host/bin/ug-agent-setup`) and as a restart input (`auth-broker.token`, `host/bin/ug-agent-setup`). |
 | `logs/` | The old service logs, from before the logs moved to `root/logs/`. Nothing writes it now; you may delete it. | nothing | none |
 
@@ -95,7 +95,7 @@ Setup builds `code/` fresh from the checkout at each run, swaps it in, and at it
 | path | what it is for | who writes it | when a change takes effect |
 |---|---|---|---|
 | `github-app.pem`, `github-app.json` | The app key and client ID, mode 600 | setup as the gh-broker user, from the wizard's copy in your data folder (`ug_write_as`, `host/lib/ug.bash`) | at the next token mint (`appFiles`, `host/gh-broker/github-app.ts`) |
-| `repos/`, `pushes/`, `reviews/`, `tmp/` | The mirrors, the push records, and the old review records. Setup copied them once from your data folder: it reads them with your rights, writes the copy with the gh-broker user's rights, and then deletes the old folder (`old_broker`, `host/bin/ug-agent-setup`). Nothing reads `reviews/` since the merge gate is deleted (`docs/adr/0026-delete-the-merge-gate.md`). | the gh-broker (`defaultConfig`, `host/gh-broker/server.ts`) | at once. Nothing runs `git gc` on the mirrors. |
+| `repos/`, `pushes/`, `reviews/`, `tmp/` | The mirrors, the push records, and the old review records. Setup copied them once from your data folder: it reads them with your rights, writes the copy with the gh-broker user's rights, and then deletes the old folder (`old_broker`, `host/bin/ug-agent-setup`). Nothing reads `reviews/` since the merge gate is deleted. | the gh-broker (`defaultConfig`, `host/gh-broker/server.ts`) | at once. Nothing runs `git gc` on the mirrors. |
 | `logs/` | The old gh-broker log, from before the log moved to `root/logs/`. Nothing writes it now; you may delete it. | nothing | none |
 
 Setup reads and writes in this home and in the login user's home only with that user's rights (`ug_read_as` and `ug_write_as`, `host/lib/ug.bash`), so a link that the user plants reaches only files that the user can already read or change. A restart input in these homes is read with that user's rights too (`ug_fingerprint`, `host/lib/ug.bash`).
@@ -132,7 +132,7 @@ Setup reads and writes in this home and in the login user's home only with that 
 
 ## Service table
 
-`host/services` lists each launchd job, one per line, with 10 fields split by `|`: label, name, scope, user, template, health, log, inputs, agent input, and follows. Setup, the watch, `ug-agent`, and the tests read it (`ug_services` and `ug_service_field`, `host/lib/ug.bash`). Both setups turn the health field into a check with one function, which refuses a kind that the job's scope cannot use (`ug_service_probe`, `host/lib/ug.bash`), and setup and the watch map the user field to a login with one function (`ug_service_login`). Setup installs a copy beside each installed `ug.bash`. A new job needs one line and a plist template.
+`host/services` lists each launchd job, one per line, with 10 fields split by `|`: label, name, scope, user, template, health, log, inputs, agent input, and follows. Setup, the watch, and `ug-agent` read it (`ug_services` and `ug_service_field`, `host/lib/ug.bash`). Both setups turn the health field into a check with one function, which refuses a kind that the job's scope cannot use (`ug_service_probe`, `host/lib/ug.bash`), and setup and the watch map the user field to a login with one function (`ug_service_login`). Setup installs a copy beside each installed `ug.bash`. A new job needs one line and a plist template.
 
 | field | what it holds |
 |---|---|
@@ -144,7 +144,7 @@ Setup reads and writes in this home and in the login user's home only with that 
 | health | How the job shows that it works: `http <url>`, `socket <path>` (the job answers its own check, and the watch reads that answer), `port <host:port>`, `launchd` (loaded, and its last exit code), `pf <port>` (the firewall refuses the agent user as the listener on that port; the watch is not root, so it checks this job like `launchd`), or `none`. An owner job can use `http`, `port`, `launchd`, or `none`; a daemon can use each kind except `none`. |
 | log | The job's log, or empty. |
 | inputs | The files whose change restarts the job. `@KEY@` is a value of `host/facts`; `@DATA@` is your data folder; `@GATEWAY@` is the `gateway=` line of `addresses`; `@OMP_SHA@` is the hash file of the pinned omp; a leading `?` keeps a file only when it exists, and setup tests it as the job's user (`ug_service_inputs`, `host/lib/ug.bash`). A home placeholder must be the home of the job's own user, and an input that names a home holds no glob character. |
-| agent input | What the job reads that the agent makes: `none`, `socket`, `port`, or `files`. A job that is not the agent's and reads agent input adds the id of the threat row that covers it, such as `files U40`; otherwise setup stops before it changes anything (`ug_services_allowed`, `ug_service_allowed`, `host/lib/ug.bash`; `docs/adr/0027-enforce-least-rights.md`). |
+| agent input | What the job reads that the agent makes: `none`, `socket`, `port`, or `files`. A job that is not the agent's and reads agent input adds the id of the threat row that covers it, such as `files U40`; otherwise setup stops before it changes anything (`ug_services_allowed`, `ug_service_allowed`, `host/lib/ug.bash`). |
 | follows | Empty, or the label of a daemon on a line above. When root setup restarts that daemon, it restarts this one too. Only a daemon can follow. |
 
 The watch keeps two named cases, because no field can hold them: it reads the gh-broker's record, its socket answer included, and the backup's age.
