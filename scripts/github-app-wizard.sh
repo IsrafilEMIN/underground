@@ -126,14 +126,14 @@ ask CHECKOUT "Your checkout (Enter takes $SCRIPT_CHECKOUT):"
 [[ -n $CHECKOUT ]] || CHECKOUT=$SCRIPT_CHECKOUT
 REPO=$(repo_from_checkout "$CHECKOUT") || return 1
 
-banner "gh-broker GitHub App: your own app, on selected repos"
+banner "GitHub App for the agents: your own app, on selected repos"
 
 stage "Register the GitHub App"
-say "The gh-broker acts as a GitHub App that your account owns. GitHub shows it as <app slug>[bot]."
+say "The agents act as a GitHub App that your account owns. GitHub shows it as <app slug>[bot]."
 open_url "https://github.com/settings/apps/new"
-step "GitHub App name: a free name, for example underground-gh-broker-<your login>."
+step "GitHub App name: a free name, for example underground-<your login>."
 step "Homepage URL: https://github.com/$REPO"
-step "Webhook: clear 'Active'. The gh-broker uses no webhooks."
+step "Webhook: clear 'Active'. The app uses no webhooks."
 step "Repository permissions, and nothing else:"
 step "  Contents: Read and write"
 step "  Pull requests: Read and write"
@@ -151,7 +151,7 @@ ask APP_SLUG "Paste the app slug:"
 [[ $APP_SLUG =~ ^[a-z0-9-]+$ ]] || { warn "that is not an app slug; run this wizard again"; exit 1; }
 
 stage "Make the private key"
-say "The gh-broker signs with this key to get a one-hour token for each repo."
+say "The token helper signs with this key to get a one-hour token for each repo."
 open_url "https://github.com/settings/apps/$APP_SLUG"
 step "Under 'Private keys', click 'Generate a private key'. On the newer page: 'Credentials' > 'Key pairs' > 'New key'."
 step "Your browser downloads a file named $APP_SLUG.<date>.private-key.pem."
@@ -169,12 +169,12 @@ fi
 (umask 077 && cp "$KEY_DOWNLOAD" "$APP_PEM.tmp")
 chmod 600 "$APP_PEM.tmp"
 mv -f "$APP_PEM.tmp" "$APP_PEM"
-printf '  %s✓ wrote%s the private key → %s (mode 600); setup moves it into %s, which you cannot read\n' "$GREEN" "$RESET" "$APP_PEM" "$(ug_fact gh_broker_home)"
+printf '  %s✓ wrote%s the private key → %s (mode 600); setup moves it into %s, which you cannot read\n' "$GREEN" "$RESET" "$APP_PEM" "$(ug_fact root)/github-app"
 if confirm "Move the downloaded copy $KEY_DOWNLOAD to the Trash?"; then
   mv -- "$KEY_DOWNLOAD" "$HOME/.Trash/"
   SKIPPED+=("Empty the Trash: it holds a copy of the app private key")
 else
-  SKIPPED+=("Delete the downloaded key $KEY_DOWNLOAD; the gh-broker reads only its own copy")
+  SKIPPED+=("Delete the downloaded key $KEY_DOWNLOAD; setup keeps its own copy")
 fi
 
 stage "Install the app on the repos that agents work in"
@@ -183,7 +183,7 @@ step "Pick your account."
 step "Repository access: 'Only select repositories', then pick $REPO and each other onboarded repo."
 step "Check that the page lists only the permissions of stage 1, then click 'Install'."
 step "The address bar now reads https://github.com/settings/installations/<number>. Copy the <number>."
-ask INSTALLATION_ID "Paste the installation number (Enter skips; the gh-broker then looks it up):"
+ask INSTALLATION_ID "Paste the installation number (Enter skips; the token helper then looks it up):"
 [[ -z $INSTALLATION_ID || $INSTALLATION_ID =~ ^[1-9][0-9]*$ ]] || { warn "that is not an installation number; run this wizard again"; exit 1; }
 
 stage "Write the app config"
@@ -198,17 +198,17 @@ mv -f "$APP_JSON.tmp" "$APP_JSON"
 printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$APP_CONFIG" "$APP_JSON"
 pause
 
-stage "Install the gh-broker and check it"
-say "Setup installs the gh-broker from this checkout, $SCRIPT_CHECKOUT, and restarts it."
+stage "Install the app key and check it"
+say "Setup installs the agent tools from this checkout, $SCRIPT_CHECKOUT, and moves the app key to the agent user."
 confirm "Run setup now?" || { SKIPPED+=("Run: $SCRIPT_CHECKOUT/host/bin/ug-setup, then type omp in $CHECKOUT"); finish; exit 1; }
 "$SCRIPT_CHECKOUT/host/bin/ug-setup"
-GH_BROKER_SOCKET=$(ug_fact root)/$(ug_fact gh_broker_socket)
-if [[ ! -S $GH_BROKER_SOCKET ]]; then
-  SKIPPED+=("The gh-broker socket $GH_BROKER_SOCKET is missing; check it with: sudo launchctl print system/com.underground.gh-broker, and read: sudo cat $(ug_fact root)/logs/gh-broker.log; then type omp in $CHECKOUT")
+GH_APP_PEM=$(ug_fact root)/github-app/github-app.pem
+if [[ ! -f $GH_APP_PEM ]]; then
+  SKIPPED+=("The app key $GH_APP_PEM is missing; check $APP_PEM, then run: $SCRIPT_CHECKOUT/host/bin/ug-setup")
   finish
   exit 1
 fi
-say "Check: type omp in $CHECKOUT. Each agent start runs gh-broker sync $REPO first, so a session that starts means the gh-broker got an app token; a missing app stops it with 'gh-broker sync $REPO failed'."
+say "Check: type omp in $CHECKOUT, then run in the session: gh pr list --repo $REPO. A list, even an empty one, means the app key works; an error means it does not."
 SKIPPED+=("Onboarding check 4: open https://github.com/settings/apps/$APP_SLUG/permissions and https://github.com/settings/installations, and confirm the app's permissions and repos")
 
 finish

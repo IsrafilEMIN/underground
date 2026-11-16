@@ -29,11 +29,8 @@ agent_home=$(ug_fact agent_home)
 agent_group=$(ug_fact agent_group)
 auth_user=$(ug_fact auth_user)
 auth_home=$(ug_fact auth_home)
-broker_user=$(ug_fact gh_broker_user)
-broker_home=$(ug_fact gh_broker_home)
 omp_group=$(ug_fact omp_group)
 agent_port=$(ug_fact agent_sshd_port)
-socket=$root/$(ug_fact gh_broker_socket)
 bin_dir=$owner_home/.local/bin
 key_dir=$data/agent-ssh
 owner_key=$key_dir/id_ed25519
@@ -97,7 +94,6 @@ agent_is_new=1
 if [[ -e $agent_home || -L $agent_home ]] || dscl . -read "/Users/$agent_user" UniqueID >/dev/null 2>&1; then agent_is_new=0; fi
 make_user "$agent_user" "Underground agent" /bin/sh "$agent_home" "$agent_is_new"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
-make_user "$broker_user" "Underground GitHub broker" /usr/bin/false "$broker_home"
 
 make_group() {
   local group=$1 real=$2 name
@@ -112,7 +108,7 @@ make_group() {
   ug_say ok "group $group" "$*, not $owner"
 }
 
-make_group "$omp_group" "Underground omp" "$agent_user" "$auth_user" "$broker_user"
+make_group "$omp_group" "Underground omp" "$agent_user" "$auth_user"
 make_group "$agent_group" "Underground agent config" "$agent_user"
 
 if [[ " $(dscl . -read /Groups/com.apple.access_ssh GroupMembership 2>/dev/null) " != *" $agent_user "* ]]; then
@@ -171,7 +167,7 @@ fi
 for old in "$root"/gh/*; do
   [[ $old == "$gh_dir" ]] || rm -rf "$old"
 done
-ug_say ok "$root/gh" "gh $gh_pin installed for the gh-broker, old versions removed"
+ug_say ok "$root/gh" "gh $gh_pin installed for the agent, old versions removed"
 
 rendered_dir=$(mktemp -d)
 cleanup+=("$rendered_dir")
@@ -182,39 +178,20 @@ render() {
   out=$(ug_render "$rendered_dir/${template##*/}" "$src/$template" "$template" "$@") || ug_die ug-agent-setup "$out"
 }
 
-install -d -m 711 -o "$broker_user" -g "$agent_group" "$root/run"
 install -d -m 711 -o root -g wheel "$root/logs"
 
-old_broker=$data/gh-broker
-for name in repos pushes reviews tmp; do
-  ug_as "$broker_user" install -d -m 700 "$broker_home/$name"
-done
-if [[ -d $old_broker && ! -L $old_broker ]]; then
-  for name in repos pushes reviews; do
-    [[ -d $old_broker/$name && ! -L $old_broker/$name ]] || continue
-    [[ -z $(ug_as "$broker_user" /usr/bin/find "$broker_home/$name" -mindepth 1 -maxdepth 1 2>/dev/null) ]] ||
-      ug_die ug-agent-setup "both $old_broker/$name and the $name folder of $broker_user hold records; keep the current one, delete the other, then run setup again"
-    copy=$(ug_as "$broker_user" mktemp -d "$broker_home/.copy.XXXXXX")
-    ug_as "$owner" /usr/bin/tar -C "$old_broker/$name" -cf - . | ug_as "$broker_user" /usr/bin/tar -C "$copy" -xf - -o || {
-      ug_as "$broker_user" rm -rf "$copy"
-      ug_die ug-agent-setup "cannot copy $old_broker/$name into the $name folder of $broker_user; nothing was moved"
-    }
-    ug_as "$broker_user" rmdir "$broker_home/$name"
-    ug_as "$broker_user" mv "$copy" "$broker_home/$name"
-  done
-  rm -rf "$old_broker"
-  ug_say changed gh-broker "copied its mirrors and records from $old_broker into $broker_home with your rights, then deleted $old_broker"
-fi
+gh_app_dir=$root/github-app
+install -d -m 750 -o root -g "$agent_group" "$gh_app_dir"
 for name in github-app.json github-app.pem; do
   [[ -e $data/$name || -L $data/$name ]] || continue
   [[ -f $data/$name && ! -L $data/$name && $(stat -f '%l %Su' "$data/$name") == "1 $owner" ]] ||
-    ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; run scripts/gh-broker-app-wizard.sh again"
-  ug_write_as "$broker_user" "$broker_home/$name" <"$data/$name"
+    ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; run scripts/github-app-wizard.sh again"
+  install -m 440 -o root -g "$agent_group" "$data/$name" "$gh_app_dir/$name"
   rm -f "$data/$name"
-  ug_say changed gh-broker "moved $name from $data into $broker_home, which you cannot read"
+  ug_say changed "github app" "moved $name from $data into $gh_app_dir, which the agent reads and cannot change"
 done
-if ! ug_as "$broker_user" /bin/test -f "$broker_home/github-app.json" || ! ug_as "$broker_user" /bin/test -f "$broker_home/github-app.pem"; then
-  ug_say ok gh-broker "no app key in $broker_home yet; run scripts/gh-broker-app-wizard.sh, then host/bin/ug-setup"
+if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; then
+  ug_say ok "github app" "no app key in $gh_app_dir yet; run scripts/github-app-wizard.sh, then host/bin/ug-setup"
 fi
 
 if [[ ! -f $root/ssh_host_ed25519_key ]]; then
@@ -250,26 +227,27 @@ engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 for name in pin.sb agent-session agent-start agent-refresh sshd_config agent-home-tar agent-pf.conf agent-pf-load; do
   render "host/agent/$name"
 done
+render "host/agent/gh-app-token"
+render "host/agent/gh" -e "s|@GH@|$gh_bin|g"
 /usr/bin/sandbox-exec -f "$rendered_dir/pin.sb" /usr/bin/true || ug_die ug-agent-setup "host/agent/pin.sb does not load under sandbox-exec; the installed code is unchanged"
 pfctl -n -f "$rendered_dir/agent-pf.conf" >/dev/null 2>&1 || ug_die ug-agent-setup "pfctl rejects host/agent/agent-pf.conf; the installed code is unchanged"
 rm -rf "$code.new" "$code.old"
-install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/gh-broker" "$code.new/authorized_keys"
+install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/usage-broker" "$code.new/authorized_keys"
 ln -s "$omp_bin" "$code.new/bin/omp"
-printf '#!/bin/sh\nBUN_BE_BUN=1 UG_GH_BROKER_SOCKET=%s exec %s %s "$@"\n' "$socket" "$omp_bin" "$code/gh-broker/client.ts" >"$code.new/bin/gh-broker"
+install -m 555 -o root -g wheel "$rendered_dir/gh-app-token" "$rendered_dir/gh" "$code.new/bin/"
 install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$code.new/bin/agent-home-tar"
-install -m 444 -o root -g wheel "$src"/host/gh-broker/*.ts "$code.new/gh-broker/"
+install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-broker/"
 install -m 444 -o root -g wheel "$src/host/facts" "$src/host/agent/config-names" "$data/addresses" "$rendered_dir/pin.sb" "$rendered_dir/sshd_config" "$code.new/"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
 install -m 555 -o root -g wheel "$rendered_dir/agent-pf-load" "$code.new/pf-load"
 install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$rendered_dir/agent-refresh" "$code.new/"
 cut -d ' ' -f 1,2 "$owner_key.pub" >"$code.new/authorized_keys/$agent_user"
 chown -hR root:wheel "$code.new"
-chmod 555 "$code.new/bin/gh-broker"
 chmod 444 "$code.new/authorized_keys/$agent_user"
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
-ug_say ok "$code" "built fresh from $src and swapped in: facts, pin.sb, pf.conf, pf-load, agent-session, agent-start, agent-refresh, sshd_config, config-names, addresses, authorized_keys, bin/, gh-broker/"
+ug_say ok "$code" "built fresh from $src and swapped in: facts, pin.sb, pf.conf, pf-load, agent-session, agent-start, agent-refresh, sshd_config, config-names, addresses, authorized_keys, bin/, usage-broker/"
 
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
@@ -373,7 +351,7 @@ start_services() {
   install -d -m 700 -o root -g wheel "$root/state"
   export UG_DATA="$data" UG_OMP_SHA="$omp_bin.sha256"
   while IFS='|' read -r label name scope user template health log tokens agent_input follows; do
-    render "$template" -e "s|@OMP@|$omp_bin|g" -e "s|@GH@|$gh_bin|g" -e "s|@GATEWAY@|$gateway|g" -e "s|@ENGINE@|$engine|g"
+    render "$template" -e "s|@OMP@|$omp_bin|g" -e "s|@GATEWAY@|$gateway|g" -e "s|@ENGINE@|$engine|g"
     rendered=$rendered_dir/${template##*/}
     out=$(ug_trusted_daemon "$rendered") || ug_die ug-agent-setup "a wall is open in the service $label: $out, so a user with fewer rights could change what it runs"
     want=$(ug_service_login "$user") || ug_die ug-agent-setup "the service table gives $label the user $user, which is not root or a key of host/facts"
@@ -399,11 +377,11 @@ start_services() {
     ug_say "$(ug_service_kind "$out")" "$ug_probe_subject" "$out"
     out=$(ug_service_runs_as "$label" "$want") || ug_die ug-agent-setup "$out; the service table says $user"
   done < <(ug_services daemon)
-  ug_say ok "daemons" "each runs as the user in host/services: the logins as $auth_user, the gh-broker as $broker_user"
+  ug_say ok "daemons" "each runs as the user in host/services: the logins as $auth_user"
 }
 
 walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall is open: ${walls//$'\n'/; }. A user that reads what the agent makes must hold only what its job needs; no service was loaded"
-ug_say ok "walls between users" "$agent_user, $auth_user, and $broker_user cannot read your home or each other's, and only $agent_user reads the gateway bearer"
+ug_say ok "walls between users" "$agent_user and $auth_user cannot read your home or each other's, and only $agent_user reads the gateway bearer"
 start_services
 
 agent_dir=$data/agent
@@ -429,7 +407,7 @@ ug_say ok backup "$code/bin/agent-home-tar, run as $agent_user, and sudo for $ow
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
-    omp | gh | code | config | state | run | logs | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
+    omp | gh | code | config | state | github-app | logs | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
     *)
       rm -rf "$item"
       ug_say changed "$item" "deleted; this version of underground does not install it"

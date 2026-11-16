@@ -11,7 +11,7 @@ The owner's macOS user session, apart from the agent user. Only the owner runs c
 _Avoid_: outside, plain terminal (as a place)
 
 **Agent home omp binary**:
-The one omp file on the mac. It is in the `omp/<pin>` folder of the root folder (`root`, `host/facts`). Only the agent user, the login user, and the gh-broker user can run it. Its pinned SHA-256 is in `omp.sha256` beside it. Setup downloads it, and `ug-agent-setup` installs it as root (`omp_bin`, `host/bin/ug-agent-setup`). Each agent session checks its hash at start (`omp_bin`, `host/agent/agent-start`). The login services and the gh-broker run it too.
+The one omp file on the mac. It is in the `omp/<pin>` folder of the root folder (`root`, `host/facts`). Only the agent user and the login user can run it. Its pinned SHA-256 is in `omp.sha256` beside it. Setup downloads it, and `ug-agent-setup` installs it as root (`omp_bin`, `host/bin/ug-agent-setup`). Each agent session checks its hash at start (`omp_bin`, `host/agent/agent-start`). The login services run it too.
 _Avoid_: omp copy
 
 **omp launcher**:
@@ -26,12 +26,8 @@ _Avoid_: agent account, bot user
 The hidden macOS user `ugauth` (`auth_user`, `host/facts`). It owns the model logins and the two bearer tokens, in its home `auth_home`. It runs the auth broker, the auth gateway, and the usage broker as LaunchDaemons. The owner's user cannot read its home.
 _Avoid_: auth root, ug-auth profile
 
-**gh-broker user**:
-The hidden macOS user `ugbroker` (`gh_broker_user`, `host/facts`). It runs the gh-broker as a LaunchDaemon and owns the app key, the mirrors, and the push records, in its home `gh_broker_home`. It holds no model login. The owner's user and the agent user cannot read its home.
-_Avoid_: broker account, bot user
-
 **Data folder**:
-The owner's data folder `owner_data` (`host/facts`), mode 700. It holds a new gh-broker app key until setup moves it, the backup settings and password, the agent's ssh key, the addresses file, `config-repo`, the pinned restic, and setup's copy of the service code. It does not hold the model logins; the login user owns those.
+The owner's data folder `owner_data` (`host/facts`), mode 700. It holds a new GitHub App key and client ID until setup installs them in the root folder, the backup settings and password, the agent's ssh key, the addresses file, `config-repo`, the pinned restic, and setup's copy of the service code. It does not hold the model logins; the login user owns those.
 _Avoid_: vault, keys dir
 
 **Owner's home**:
@@ -81,7 +77,7 @@ The daily restic snapshot of the agent home. It goes to one repo on the owner's 
 _Avoid_: archive, sync, Time Machine
 
 **Setup**:
-The host script that does what `git pull` cannot. It downloads the pinned omp and restic, makes the data folder and the backup password, and runs `sudo host/bin/ug-agent-setup`. That step asks for the owner's password. It installs the agent home omp binary, the agent user, the login user and its services, the gh-broker user and the gh-broker, the omp launcher, and the backup helper. Then it restarts the host services and checks, as the owner, that the owner cannot run omp or read a login or the bearer (`check_walls`, `host/bin/ug-setup`). It then runs the walls check for the lower users (`ug_user_walls`, `host/lib/ug.bash`), which tests from each service user and the agent user that none can list or read another party's home or the staged models file. It first fast-forwards `main` in its own checkout from `origin`. It runs no tests. It runs when underground's `main`, a pin, a host service, or macOS changes.
+The host script that does what `git pull` cannot. It downloads the pinned omp and restic, makes the data folder and the backup password, and runs `sudo host/bin/ug-agent-setup`. That step asks for the owner's password. It installs the agent home omp binary, the agent user, the login user and its services, the GitHub App key, the `gh` wrapper and the token helper, the omp launcher, and the backup helper. Then it restarts the host services and checks, as the owner, that the owner cannot run omp or read a login or the bearer (`check_walls`, `host/bin/ug-setup`). It then runs the walls check for the lower users (`ug_user_walls`, `host/lib/ug.bash`), which tests from each service user and the agent user that none can list or read another party's home or the staged models file. It first fast-forwards `main` in its own checkout from `origin`. It runs no tests. It runs when underground's `main`, a pin, a host service, or macOS changes.
 _Avoid_: install, installer, bootstrap
 
 **Crossing**:
@@ -90,28 +86,28 @@ _Avoid_: hole, exception, bypass
 
 ### GitHub and the merge
 
-**gh-broker**:
-Runs today: a host service that does GitHub operations for the sessions. It holds the GitHub credential, and each session reaches it through one socket (`socketPath`, `host/gh-broker/server.ts`). It serves each repo where the gh-broker app is installed. In redesign.
-_Avoid_: broker (alone), agent-gh, proxy
-
 **Reviewer role**:
-One of `code-review`, `security-review`, and `risk-review`. A reviewer is a skill from the config repo, not a separate session. Any omp session can run it, with the same home and trust level as every other session. It reads a PR with `gh-broker sync <owner/repo> --pr <n>` and gives its findings to the author. It is a quality step, not a safety wall.
+One of `code-review`, `security-review`, and `risk-review`. A reviewer is a skill from the config repo, not a separate session. Any omp session can run it, with the same home and trust level as every other session. It reads a PR with `gh pr checkout <n>` or `gh pr diff <n>` and gives its findings to the author. It is a quality step, not a safety wall.
 _Avoid_: reviewer session, review agent, bug bot, security bot
 
-**Push record**:
-The commit that the gh-broker last pushed to one branch of one repo. A later push replaces it. It serves the push lease: a push may replace the GitHub branch head only when that head is this commit, or an ancestor of the new commit (`pushLease`, `host/gh-broker/server.ts`). The gh-broker keeps it in its `pushes` folder, in the gh-broker user's home, with the `/` in the branch name written as `%2F`.
-_Avoid_: push log, provenance record
+**GitHub App**:
+The GitHub App that the agent acts as, through the pinned gh and git. The owner's personal account owns it. It is installed only on the repos the owner selects, and its rights are in `docs/PRODUCT-BRIEF.md`, "What the agent needs to do its work". The owner makes its key with `scripts/github-app-wizard.sh`. GitHub shows the app's actions as `<app slug>[bot]`.
+_Avoid_: bot account, bot token, machine user, service account
 
-**gh-broker app**:
-The GitHub App that the gh-broker acts as. The owner's personal account owns it. It is installed only on the selected repos, with Contents and Pull requests read and write, Metadata, Checks, and Commit statuses read, and no Workflows or Administration permission. Its private key is `github-app.pem` in the gh-broker user's home, with `github-app.json` beside it (`appFiles`, `host/gh-broker/github-app.ts`). GitHub shows the gh-broker's actions as `<app slug>[bot]`.
-_Avoid_: bot account, bot token, gh-broker token, machine user, service account
+**App key**:
+The private key of the GitHub App, `github-app.pem`, and its client ID in `github-app.json`. Setup installs them in the root folder (`github-app/`, `host/bin/ug-agent-setup`). The agent user reads them and cannot change them. The agent can send them anywhere, and the key does not expire: the owner replaces it on GitHub (`docs/PRODUCT-BRIEF.md`, "GitHub ruleset on main").
+_Avoid_: PEM, secret, bot key
+
+**Token helper**:
+`host/agent/gh-app-token`, installed as `code/bin/gh-app-token` in the root folder. It signs a request with the app key, prints one installation token, and caches it in `.cache/underground/gh-token` in the agent home until 5 minutes before its expiry. The pinned gh (through `host/agent/gh`) and git get their token from it.
+_Avoid_: token script, gh token
 
 **Installation token**:
-A token of the gh-broker app for one repo, which the gh-broker gets with the app's private key. It lasts one hour. Only the gh-broker holds it, in memory.
-_Avoid_: app token, gh-broker token, PAT
+A token of the GitHub App for its installation, with all the app's rights and repos. It lasts one hour. The token helper makes it and caches it in the agent home.
+_Avoid_: app token, PAT
 
 **Onboarding checks**:
-The checks that the owner makes on GitHub for each repo before agents work alone in it. A repo is onboarded when the owner has made them and installed the gh-broker app on it. The app's installation is the list.
+The checks that the owner makes on GitHub for each repo before agents work alone in it. A repo is onboarded when the owner has made them and installed the GitHub App on it. The app's installation is the list.
 _Avoid_: onboarding list, repo setup
 
 ### Models
@@ -125,7 +121,7 @@ The host service `omp auth-gateway serve`, on the tailscale address of this mac 
 _Avoid_: model proxy, LLM proxy
 
 **Usage broker**:
-The host service `host/gh-broker/usage-broker.ts`, run as the login user from the pinned omp (`host/agent/com.underground.usage-broker.plist`). It speaks omp's broker protocol with no credentials. It passes `/v1/usage` to the auth gateway, so omp's native `/usage` works. It listens on the usage broker port (`usage_broker_port`, `host/facts`) on loopback only (`USAGE_BROKER_HOST`, `host/gh-broker/usage-broker.ts`).
+The host service `host/usage-broker/usage-broker.ts`, run as the login user from the pinned omp (`host/agent/com.underground.usage-broker.plist`). It speaks omp's broker protocol with no credentials. It passes `/v1/usage` to the auth gateway, so omp's native `/usage` works. It listens on the usage broker port (`usage_broker_port`, `host/facts`) on loopback only (`USAGE_BROKER_HOST`, `host/usage-broker/usage-broker.ts`).
 _Avoid_: usage proxy, fake broker
 
 **Gateway bearer**:

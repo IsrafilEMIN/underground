@@ -1,0 +1,76 @@
+#!/bin/bash
+set -uo pipefail
+
+PATH=/usr/bin:/bin
+root=@ROOT@
+pem=$root/github-app/github-app.pem
+json=$root/github-app/github-app.json
+api=https://api.github.com
+cache_dir=$HOME/.cache/underground
+cache=$cache_dir/gh-token
+
+fail() {
+  printf 'gh-app-token: %s\n' "$*" >&2
+  exit 1
+}
+
+now=$(/bin/date +%s)
+if read -r expires cached 2>/dev/null <"$cache" && (( now < expires - 300 )); then
+  printf '%s\n' "$cached"
+  exit 0
+fi
+
+[[ -r $pem ]] || fail "no key file $pem that this user can read"
+[[ -r $json ]] || fail "no app config $json that this user can read"
+client_id=$(sed -n 's/.*"client_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9.]*\)".*/\1/p' "$json")
+[[ -n $client_id ]] || fail "the app config $json has no client_id"
+installation=$(sed -n 's/.*"installation_id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$json")
+
+b64url() {
+  /usr/bin/openssl base64 -A | sed 's/=*$//; s|+|-|g; s|/|_|g'
+}
+
+header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
+payload=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$client_id" | b64url)
+signature=$(printf '%s' "$header.$payload" | /usr/bin/openssl dgst -sha256 -sign "$pem" -binary | b64url) || fail "cannot sign with the app key $pem"
+jwt=$header.$payload.$signature
+
+reply=
+call() {
+  reply=$(/usr/bin/curl -sS --max-time 20 -X "$1" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer $jwt" \
+    -H "User-Agent: underground-gh-app-token" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$api$2") || fail "cannot reach GitHub for $1 $2"
+}
+
+refused() {
+  local message
+  message=$(printf '%s' "$1" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p')
+  fail "GitHub refused the request${message:+: $message}"
+}
+
+if [[ -z $installation ]]; then
+  call GET /app/installations
+  installation=$(printf '%s' "$reply" | /usr/bin/grep -o '"id": *[0-9][0-9]*' | sed -n '1s/.*: *//p')
+  if [[ -z $installation ]]; then
+    [[ $reply == *'"message"'* ]] && refused "$reply"
+    fail "the app has no installation"
+  fi
+fi
+
+call POST "/app/installations/$installation/access_tokens"
+token=$(printf '%s' "$reply" | sed -n 's/.*"token": *"\(ghs_[A-Za-z0-9_.-]*\)".*/\1/p')
+if [[ -z $token ]]; then
+  [[ $reply == *'"message"'* ]] && refused "$reply"
+  fail "GitHub sent no installation token"
+fi
+expires_at=$(printf '%s' "$reply" | sed -n 's/.*"expires_at": *"\([^"]*\)".*/\1/p')
+expires=$(/bin/date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$expires_at" +%s) || fail "GitHub sent an unknown expiry time: $expires_at"
+
+mkdir -p -m 700 "$cache_dir" || fail "cannot make $cache_dir"
+tmp=$(mktemp "$cache_dir/gh-token.XXXXXX") || fail "cannot make a temp file in $cache_dir"
+printf '%s %s\n' "$expires" "$token" >"$tmp" || fail "cannot write $tmp"
+mv -f "$tmp" "$cache" || fail "cannot move $tmp to $cache"
+printf '%s\n' "$token"
