@@ -169,3 +169,7 @@ _Avoid_: task, job, issue
 **Gate**:
 The question before each decision: does this bring us closer to the north star, or further away? Yes only if it stops an irreversible harm, or keeps undo and work possible.
 _Avoid_: review, approval
+
+**MVPF**:
+The future underground MVP after 0.5. A threat marked MVPF has no control in 0.5.
+_Avoid_: later, backlog, v1
