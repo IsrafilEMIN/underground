@@ -54,7 +54,7 @@ let failed = false;
 for (const file of files) {
   const text = readFileSync(resolve(root, file), "utf8");
   for (const line of findings(text)) {
-    console.error(`${file}:${line}: a path below the home of a user with fewer rights; run the command as that user with ug_as (docs/adr/0027-enforce-least-rights.md)`);
+    console.error(`${file}:${line}: a path below the home of a user with fewer rights; run the command as that user with ug_as`);
     failed = true;
   }
 }
