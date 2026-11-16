@@ -44,7 +44,7 @@ Before each decision, the agent and the owner ask: does this bring us closer to 
 |Start as its own user, in its own home, on one binary, with the current rules.|The omp launcher (`host/bin/ug-agent`), the session start (`host/agent/agent-start`).|
 |A config that resets at each start, so its own edits die with the session.|The staged config copy (`config-names`, `host/agent/agent-start`); `host/bin/ug-agent-setup` stages it.|
 |Free read and write inside its own home.|The agent user's file rights.|
-|A current clone of each repo, kept current between sessions.|`host/agent/agent-refresh`.|
+|A current clone of each repo at each start.|The fetch at the session start (`clone`, `host/agent/agent-start`).|
 |Reach GitHub as a GitHub App, with a short list of rights, on the repos the owner picks. Its rights: Contents read and write, Pull requests read and write, Checks read, Commit statuses read, Metadata read. No Workflows, no Administration (the permission steps of `scripts/github-app-wizard.sh`).|The app key that setup gives the agent to read (`root/github-app/`), the token helper (`host/agent/gh-app-token`), and the pinned gh through the `gh` wrapper (`host/agent/gh`).|
 |Call models without holding a login.|The auth broker and the auth gateway, run by the login user.|
 |Usage numbers.|The usage broker (`host/usage-broker/usage-broker.ts`).|

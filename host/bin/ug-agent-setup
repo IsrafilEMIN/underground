@@ -224,7 +224,7 @@ gateway=$(sed -n 's/^gateway=//p' "$data/addresses" 2>/dev/null) || true
 engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 [[ $gateway =~ $ip_port && $engine =~ $ip_port ]] || ug_die ug-agent-setup "$data/addresses needs a gateway=<ip>:<port> and an engine=<ip>:<port> line"
 
-for name in pin.sb agent-session agent-start agent-refresh sshd_config agent-home-tar agent-pf.conf agent-pf-load; do
+for name in pin.sb agent-session agent-start sshd_config agent-home-tar agent-pf.conf agent-pf-load; do
   render "host/agent/$name"
 done
 render "host/agent/gh-app-token"
@@ -240,14 +240,14 @@ install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-b
 install -m 444 -o root -g wheel "$src/host/facts" "$src/host/agent/config-names" "$data/addresses" "$rendered_dir/pin.sb" "$rendered_dir/sshd_config" "$code.new/"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
 install -m 555 -o root -g wheel "$rendered_dir/agent-pf-load" "$code.new/pf-load"
-install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$rendered_dir/agent-refresh" "$code.new/"
+install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$code.new/"
 cut -d ' ' -f 1,2 "$owner_key.pub" >"$code.new/authorized_keys/$agent_user"
 chown -hR root:wheel "$code.new"
 chmod 444 "$code.new/authorized_keys/$agent_user"
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
-ug_say ok "$code" "built fresh from $src and swapped in: facts, pin.sb, pf.conf, pf-load, agent-session, agent-start, agent-refresh, sshd_config, config-names, addresses, authorized_keys, bin/, usage-broker/"
+ug_say ok "$code" "built fresh from $src and swapped in: facts, pin.sb, pf.conf, pf-load, agent-session, agent-start, sshd_config, config-names, addresses, authorized_keys, bin/, usage-broker/"
 
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
@@ -380,8 +380,23 @@ start_services() {
   ug_say ok "daemons" "each runs as the user in host/services: the logins as $auth_user"
 }
 
+retire_daemons() {
+  local plist label err keep
+  keep=$(ug_services daemon | cut -d '|' -f 1)
+  for plist in /Library/LaunchDaemons/com.underground.*.plist; do
+    [[ -e $plist || -L $plist ]] || continue
+    label=${plist##*/}
+    label=${label%.plist}
+    grep -qxF "$label" <<<"$keep" && continue
+    err=$(ug_stop_service "system/$label") || ug_die ug-agent-setup "$err"
+    rm -f "$plist" "$root/state/$label.fingerprint"
+    ug_say changed "service $label" "booted out and deleted; this version of underground does not run it"
+  done
+}
+
 walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall is open: ${walls//$'\n'/; }. A user that reads what the agent makes must hold only what its job needs; no service was loaded"
 ug_say ok "walls between users" "$agent_user and $auth_user cannot read your home or each other's, and only $agent_user reads the gateway bearer"
+retire_daemons
 start_services
 
 agent_dir=$data/agent

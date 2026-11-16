@@ -21,7 +21,6 @@ Setup first asks GitHub, with your `gh` login, whether `main` of the checkout's 
     root/config/ ──copy──► agent_home/.omp/agent/
 
 (3) ALL THE TIME (services in host/services)
-    agent refresh every 30 s syncs each clone that a session used in the last 7 days
     agent firewall every 30 s loads root/code/pf.conf into the pf anchor
     auth broker   reads/writes  auth_home/.omp  (logins, tokens)
     auth gateway  reads  auth_home/.omp, listens on the gateway address
@@ -70,10 +69,10 @@ Setup builds `code/` fresh from the checkout at each run, swaps it in, and at it
 | `omp/<pin>/omp`, `omp.sha256` | The one pinned omp, owner and mode set by `ug_ensure_owner_mode` (`host/bin/ug-agent-setup`), group `omp_group` | `omp_bin`, `host/bin/ug-agent-setup` | `omp_bin`, `host/agent/agent-start` checks the hash at each start |
 | `code/facts`, `code/config-names`, `code/addresses` | The host facts, the names that the agent config owns in `agent_home/.omp/agent`, and a root-owned copy of your `addresses`. The usage broker runs as the login user and cannot read your home. | `code.new`, `host/bin/ug-agent-setup` | `config-names`, `host/agent/agent-start`, `host/agent/agent-home-tar`; `addressesFile`, `host/usage-broker/usage-broker.ts` |
 | `code/bin/omp` | The link to the pinned omp | `code.new`, `host/bin/ug-agent-setup` | `omp_bin` and `host/agent/agent-start`; the usage broker service |
-| `code/bin/gh`, `code/bin/gh-app-token` | The `gh` wrapper, which sets `GH_TOKEN` and runs the pinned gh, and the token helper, both `root:wheel` mode 555 | `code.new`, `host/bin/ug-agent-setup` | the agent's `git` and `gh` (`host/agent/agent-start`, `host/agent/agent-refresh`); the wrapper reads the helper |
+| `code/bin/gh`, `code/bin/gh-app-token` | The `gh` wrapper, which sets `GH_TOKEN` and runs the pinned gh, and the token helper, both `root:wheel` mode 555 | `code.new`, `host/bin/ug-agent-setup` | the agent's `git` and `gh` (`host/agent/agent-start`); the wrapper reads the helper |
 | `code/usage-broker/*.ts` | The usage broker code, which the pinned omp runs | `code.new`, `host/bin/ug-agent-setup` | the usage broker service |
 | `code/bin/agent-home-tar` | The backup helper. It runs as the agent user, not as root. | `code.new`, `host/bin/ug-agent-setup` | `agent_tar`, `host/bin/ug-backup`, through `sudo -n -u <agent_user>` and `/etc/sudoers.d/underground-backup` (System files) |
-| `code/pin.sb`, `code/agent-session`, `code/agent-start`, `code/agent-refresh`, `code/sshd_config`, `code/authorized_keys/ugagent`, `ssh_host_ed25519_key` | The agent login, its sandbox, and the clone refresh. Setup makes the host key once. | `code.new` and `ssh-keygen`, `host/bin/ug-agent-setup` | the agent sshd, `sandbox-exec`, `host/agent/agent-session`, and the refresh service |
+| `code/pin.sb`, `code/agent-session`, `code/agent-start`, `code/sshd_config`, `code/authorized_keys/ugagent`, `ssh_host_ed25519_key` | The agent login and its sandbox. Setup makes the host key once. | `code.new` and `ssh-keygen`, `host/bin/ug-agent-setup` | the agent sshd, `sandbox-exec`, and `host/agent/agent-session` |
 | `code/pf.conf`, `code/pf-load` | The firewall line that refuses the agent user as the listener on the auth broker's port (`auth_broker_port`), and its loader | `code.new`, `host/bin/ug-agent-setup` | the firewall service in `host/services`, at load and every 30 s (`StartInterval`, `host/agent/com.underground.agent-pf.plist`) |
 | `gh/<pin>/gh` | The pinned gh that the `gh` wrapper runs, `root:wheel` mode 555. The wrapper gets its path from `@GH@` (`host/agent/gh`). | `gh_bin`, `host/bin/ug-agent-setup` | the `gh` wrapper (`host/agent/gh`) |
 | `github-app/` | The GitHub App key and client ID, `github-app.pem` and `github-app.json`. The folder is root:`agent_group` mode 750; the files are root-owned, group `agent_group`, mode 440, so the agent user reads them and cannot change them. | setup, from the wizard's files in your data folder (`github-app/`, `host/bin/ug-agent-setup`) | the token helper (`host/agent/gh-app-token`) |
@@ -95,8 +94,7 @@ Setup reads and writes in the login user's home only with that user's rights (`u
 | path | what it is for | who writes it |
 |---|---|---|
 | `.omp/agent/` | The agent's omp config. Each start replaces the `config-names` entries with the staged copy (`config-names`, `host/agent/agent-start`). | `agent-start`, then omp |
-| `work/<owner>/<repo>` | The agent's clone of each repo (`clone`, `host/agent/agent-start`). Each start touches `.git/ug-launched` (`ug-launched`, `host/agent/agent-start`). The refresh syncs only clones whose marker is less than 7 days old (`-mtime`, `host/agent/agent-refresh`). | `agent-start`, the refresh, and the agent |
-| `logs/agent-refresh.log` | The refresh log. The refresh empties it when it is over 1 MiB (`log` and `1048576`, `host/agent/agent-refresh`). | the refresh |
+| `work/<owner>/<repo>` | The agent's clone of each repo (`clone`, `host/agent/agent-start`). Each start fetches `origin` and checks out its default branch; nothing syncs a clone between starts. | `agent-start` and the agent |
 | `.cache/underground/gh-token` | The cached GitHub App installation token, mode 600, in a folder of mode 700. The token helper reuses it until 5 minutes before its expiry. | the token helper (`host/agent/gh-app-token`), which writes and reads it |
 | everything else | Sessions, caches, worktrees. The nightly backup saves it, without the config names and `.cache` (`--exclude`, `host/agent/agent-home-tar`). | the agent |
 
@@ -104,7 +102,7 @@ Setup reads and writes in the login user's home only with that user's rights (`u
 
 | path | what it is for | who writes it |
 |---|---|---|
-| The daemons, as LaunchDaemons in `/Library/LaunchDaemons/` | The auth broker, the auth gateway, the usage broker, the agent sshd, and the clone refresh. After setup loads one, it checks that launchd runs it as the user of its row (`ug_service_runs_as`, `host/lib/ug.bash`). Before setup loads one, it checks each program, folder, and `PATH` entry that the service names: root or the service's own user must own it and each folder above it, and no group, other user, or access rule may let another user write it. A launchd log must not be a link, root or the service's user must own it, and only root may own its folder and each folder above it (`ug_trusted_daemon`, `host/lib/ug.bash`). If not, setup stops. The names are in `host/services`. | `start_services`, `host/bin/ug-agent-setup` |
+| The daemons, as LaunchDaemons in `/Library/LaunchDaemons/` | The auth broker, the auth gateway, the usage broker, and the agent sshd. After setup loads one, it checks that launchd runs it as the user of its row (`ug_service_runs_as`, `host/lib/ug.bash`). Before setup loads one, it checks each program, folder, and `PATH` entry that the service names: root or the service's own user must own it and each folder above it, and no group, other user, or access rule may let another user write it. A launchd log must not be a link, root or the service's user must own it, and only root may own its folder and each folder above it (`ug_trusted_daemon`, `host/lib/ug.bash`). If not, setup stops. Setup boots out and deletes any other underground LaunchDaemon (`retire_daemons`, `host/bin/ug-agent-setup`). The names are in `host/services`. | `start_services`, `host/bin/ug-agent-setup` |
 | The owner's services as LaunchAgents in `~/Library/LaunchAgents/` | The nightly backup and the watch. Setup boots out and deletes any other underground LaunchAgent (`retire_agents`, `host/bin/ug-setup`). The names are in `host/services`. | `start_services`, `host/bin/ug-setup` |
 | `/etc/ssh/sshd_config.d/010-underground-deny-ugagent.conf` | It keeps the agent user out of the system sshd. | `DenyUsers`, `host/bin/ug-agent-setup` |
 | `/etc/sudoers.d/underground-backup` | It lets you run the backup helper in `root/code/bin/` as the agent user, with no password. | `NOPASSWD`, `host/bin/ug-agent-setup` |
@@ -118,7 +116,7 @@ Setup reads and writes in the login user's home only with that user's rights (`u
 | reader | how it gets the values |
 |---|---|
 | the shell scripts | `ug_fact`, `host/lib/ug.bash`. It reads the `facts` file one folder above the `ug.bash` that the script sources, so setup installs a copy beside each installed `ug.bash`. |
-| templates: the plists, `sshd_config`, `pin.sb`, `agent-start`, `agent-refresh`, `agent-session`, `agent-home-tar`, `agent-pf.conf`, `agent-pf-load` | `ug_render`, `host/lib/ug.bash`. Each `key=value` line fills `@KEY@`; setup stops on a placeholder that nothing fills. |
+| templates: the plists, `sshd_config`, `pin.sb`, `agent-start`, `agent-session`, `agent-home-tar`, `agent-pf.conf`, `agent-pf-load` | `ug_render`, `host/lib/ug.bash`. Each `key=value` line fills `@KEY@`; setup stops on a placeholder that nothing fills. |
 | the usage broker | `readHostFacts`, `host/usage-broker/facts.ts`. It reads `../facts` next to its folder: the usage broker reads the copy in `root/code/`. |
 
 ## Service table
