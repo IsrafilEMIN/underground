@@ -189,7 +189,6 @@ ug_service_probe() {
     *:http) ug_probe=(ug_http_answers "$target") ;;
     *:port) ug_probe=(ug_port_answers "${target%:*}" "${target##*:}") ;;
     *:launchd) ug_probe=(launchctl print "$domain/$label") ;;
-    agent:none) ug_probe=(true) ;;
     daemon:pf)
       agent=$(ug_fact agent_user) || return 1
       ug_probe=(ug_pf_refuses_listener "$(id -u "$agent")" "$target")

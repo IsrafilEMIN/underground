@@ -185,13 +185,13 @@ install -d -m 750 -o root -g "$agent_group" "$gh_app_dir"
 for name in github-app.json github-app.pem; do
   [[ -e $data/$name || -L $data/$name ]] || continue
   [[ -f $data/$name && ! -L $data/$name && $(stat -f '%l %Su' "$data/$name") == "1 $owner" ]] ||
-    ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; run scripts/github-app-wizard.sh again"
+    ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; write it again as a plain file"
   install -m 440 -o root -g "$agent_group" "$data/$name" "$gh_app_dir/$name"
   rm -f "$data/$name"
   ug_say changed "github app" "moved $name from $data into $gh_app_dir, which the agent reads and cannot change"
 done
 if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; then
-  ug_say ok "github app" "no app key in $gh_app_dir yet; run scripts/github-app-wizard.sh, then host/bin/ug-setup"
+  ug_say ok "github app" "no app key in $gh_app_dir yet; put the private key of the GitHub App in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
 fi
 
 if [[ ! -f $root/ssh_host_ed25519_key ]]; then
