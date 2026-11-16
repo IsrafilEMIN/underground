@@ -1,5 +1,4 @@
 com.underground.backup|backup|agent|owner|host/launchd/com.underground.backup.plist|launchd|@DATA@/backup/backup.log||files U40|
-com.underground.watch|watch|agent|owner|host/launchd/com.underground.watch.plist|none|@DATA@/watch/watch.log||none|
 com.underground.auth-broker|auth broker|daemon|auth_user|host/agent/com.underground.auth-broker.plist|http http://127.0.0.1:@AUTH_BROKER_PORT@/v1/healthz|@ROOT@/logs/auth-broker.log|@OMP_SHA@ ?@AUTH_HOME@/.omp/auth-broker.token ?@AUTH_HOME@/.omp/agent/config.yml|port U43|
 com.underground.auth-gateway|auth gateway|daemon|auth_user|host/agent/com.underground.auth-gateway.plist|http http://@GATEWAY@/healthz|@ROOT@/logs/auth-gateway.log|@OMP_SHA@ @AUTH_HOME@/.omp/auth-gateway.token ?@AUTH_HOME@/.omp/auth-broker.token ?@AUTH_HOME@/.omp/agent/config.yml|port U43|com.underground.auth-broker
 com.underground.usage-broker|usage broker|daemon|auth_user|host/agent/com.underground.usage-broker.plist|http http://127.0.0.1:@USAGE_BROKER_PORT@/v1/healthz|@ROOT@/logs/usage-broker.log|@OMP_SHA@ @ROOT@/code/facts @ROOT@/code/usage-broker/*.ts|port U43|
