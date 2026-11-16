@@ -100,8 +100,8 @@ ug_write_as() {
 ug_service_allowed() {
   local label=$1 user=$2 agent_input=$3 inputs=$4 log=$5 own tok rest ph
   local -a words
-  [[ $agent_input =~ ^(none|socket|port|files)( U[0-9]+)?$ ]] ||
-    { printf '%s: the service table gives it the agent input "%s"; write none, socket, port, or files, and a threat row id after it when the job runs as a user other than the agent\n' "$label" "$agent_input"; return 1; }
+  [[ $agent_input =~ ^(none|port|files)( U[0-9]+)?$ ]] ||
+    { printf '%s: the service table gives it the agent input "%s"; write none, port, or files, and a threat row id after it when the job runs as a user other than the agent\n' "$label" "$agent_input"; return 1; }
   if [[ $user != agent_user && $agent_input != none && $agent_input != *" U"* ]]; then
     printf '%s runs as %s and reads %s that the agent makes; run it as a user that holds only what it needs, or name the threat row that accepts it\n' "$label" "$user" "$agent_input"
     return 1
@@ -190,7 +190,6 @@ ug_service_probe() {
     *:port) ug_probe=(ug_port_answers "${target%:*}" "${target##*:}") ;;
     *:launchd) ug_probe=(launchctl print "$domain/$label") ;;
     agent:none) ug_probe=(true) ;;
-    daemon:socket) ug_probe=(ug_socket_answers "$target") ;;
     daemon:pf)
       agent=$(ug_fact agent_user) || return 1
       ug_probe=(ug_pf_refuses_listener "$(id -u "$agent")" "$target")
@@ -409,8 +408,6 @@ ug_wait() {
 }
 
 ug_http_answers() { curl -fsS -o /dev/null --max-time 1 "$1"; }
-
-ug_socket_answers() { printf '' | nc -w 1 -U "$1" | grep -q .; }
 
 ug_port_answers() { nc -z -w 1 "$1" "$2"; }
 

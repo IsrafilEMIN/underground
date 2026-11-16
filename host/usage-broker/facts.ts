@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type HostFacts = { root: string; ownerData: string; ghBrokerSocket: string; ghBrokerStatus: string; usageBrokerPort: number };
+export type HostFacts = { root: string; usageBrokerPort: number };
 
 export const FACTS_FILE = join(import.meta.dirname, "../facts");
 
@@ -18,12 +18,5 @@ export function readHostFacts(file: string = FACTS_FILE): HostFacts {
   };
   const port = Number(need("usage_broker_port"));
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${file} has usage_broker_port ${need("usage_broker_port")}, which is not a port`);
-  const root = need("root");
-  return {
-    root,
-    ownerData: need("owner_data"),
-    ghBrokerSocket: join(root, need("gh_broker_socket")),
-    ghBrokerStatus: join(root, need("gh_broker_status")),
-    usageBrokerPort: port,
-  };
+  return { root: need("root"), usageBrokerPort: port };
 }

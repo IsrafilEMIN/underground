@@ -1,0 +1,6 @@
+#!/bin/bash
+set -eo pipefail
+
+GH_TOKEN=$("@ROOT@/code/bin/gh-app-token") || exit 1
+export GH_TOKEN
+exec "@GH@" "$@"

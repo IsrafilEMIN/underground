@@ -1,4 +1,4 @@
-import type { Checked } from "./protocol.ts";
+type Checked<T> = { ok: true; value: T } | { ok: false; reason: string };
 
 export type Addresses = { gateway: string; engine: string };
 

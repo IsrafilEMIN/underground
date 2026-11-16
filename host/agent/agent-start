@@ -4,7 +4,7 @@ set -eo pipefail
 TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)
 export HOME=@AGENT_HOME@ TMPDIR PATH=@ROOT@/code/bin:/usr/bin:/bin:/usr/sbin:/sbin
 export OMP_AUTH_BROKER_URL=http://127.0.0.1:@USAGE_BROKER_PORT@ OMP_AUTH_BROKER_TOKEN=usage-only
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1='!f() { t=$("@ROOT@/code/bin/gh-app-token") || exit 1; echo username=x-access-token; echo "password=$t"; }; f' GIT_CONFIG_KEY_2=core.hooksPath GIT_CONFIG_VALUE_2=/dev/null
 
 root=@ROOT@
 code=$root/code
@@ -26,7 +26,8 @@ hash_pid=$!
 # The agent's ssh login has no desktop session, so macOS logs a failed text-checking service lookup to stderr many times a session.
 # A pipe, not >(...): the pin denies writes to /dev/fd. grep ignores SIGINT so that a Ctrl-C cannot close omp's stderr.
 start_omp() {
-  unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+  unset GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
+  export GIT_CONFIG_COUNT=2
   { "$omp_bin" "$@" 2>&1 1>&3 3>&- | { trap '' INT; /usr/bin/grep --line-buffered -v -F 'dataFromCheckingString received error' >&2 || true; }; } 3>&1
   exit 0
 }
@@ -80,20 +81,19 @@ busy() {
 }
 
 sync_status=0
-synced=$(/usr/bin/lockf -k -t 3 .git/ug-sync.lock "$code/bin/gh-broker" sync "$UG_REPO" --cached) || sync_status=$?
+/usr/bin/lockf -k -t 3 .git/ug-sync.lock git fetch --quiet --no-tags origin || sync_status=$?
 wait "$hash_pid" || exit 1
 (( sync_status != 75 )) || busy "$@"
 (( sync_status == 0 )) || {
-  case $sync_status in
-    69) hint="the gh-broker does not answer; the owner checks it with: sudo launchctl print system/com.underground.gh-broker" ;;
-    2) hint="the gh-broker refused it, for the reason above" ;;
-    *) hint="is the gh-broker app installed on it?" ;;
-  esac
-  printf 'agent-start: gh-broker sync %s failed: %s\n' "$UG_REPO" "$hint" >&2
+  printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
   exit 69
 }
-base=$(printf '%s\n' "$synced" | sed -n 's|^origin/\([^ ]*\) is now .*|\1|p')
-[[ -n $base ]] || die "gh-broker sync gave no branch: $synced"
+remote=$(git ls-remote --symref origin HEAD) || remote=
+base=$(printf '%s\n' "$remote" | sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]].*|\1|p')
+[[ -n $base ]] || {
+  printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
+  exit 69
+}
 
 checkout_status=0
 /usr/bin/lockf -k -t 3 .git/ug-sync.lock git checkout -q --detach "origin/$base" || checkout_status=$?
