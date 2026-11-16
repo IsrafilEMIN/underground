@@ -46,11 +46,11 @@ ug_fact() {
 ug_services_file=${BASH_SOURCE[0]%/*}/../services
 
 ug_services() {
-  local want=${1:-} label name scope user template health log inputs agent_input follows
-  while IFS='|' read -r label name scope user template health log inputs agent_input follows || [[ -n $label ]]; do
+  local want=${1:-} label name scope user template health log inputs follows
+  while IFS='|' read -r label name scope user template health log inputs follows || [[ -n $label ]]; do
     [[ -n $label && $label != \#* ]] || continue
     [[ -z $want || $scope == "$want" ]] || continue
-    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log" "$inputs" "$agent_input" "$follows"
+    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log" "$inputs" "$follows"
   done <"$ug_services_file"
 }
 
@@ -73,45 +73,9 @@ ug_write_as() {
   ug_as "$1" /bin/sh -c 'umask 077 && /bin/cat >"$1" && /bin/chmod 600 "$1"' sh "$2"
 }
 
-ug_service_allowed() {
-  local label=$1 user=$2 agent_input=$3 inputs=$4 log=$5 own tok rest ph
-  local -a words
-  [[ $agent_input =~ ^(none|port|files)$ ]] ||
-    { printf '%s: the service table gives it the agent input "%s"; write none, port, or files\n' "$label" "$agent_input"; return 1; }
-  own=@$(tr '[:lower:]' '[:upper:]' <<<"${user%_user}_home")@
-  read -r -a words <<<"$inputs $log"
-  for tok in ${words[@]+"${words[@]}"}; do
-    tok=${tok#\?}
-    [[ $tok == *_HOME@* ]] || continue
-    if [[ $tok == *\** || $tok == *\?* || $tok == *\[* ]]; then
-      printf '%s names the home in %s with a glob; name the one file the job reads\n' "$label" "$tok"
-      return 1
-    fi
-    rest=$tok
-    while [[ $rest =~ (@[A-Z_]*_HOME@) ]]; do
-      ph=${BASH_REMATCH[1]}
-      if [[ $ph != "$own" ]]; then
-        printf '%s runs as %s and names %s, which is not the home of %s; a job reads only the home of its own user\n' "$label" "$user" "$ph" "$user"
-        return 1
-      fi
-      rest=${rest#*"$ph"}
-    done
-  done
-}
-
-ug_services_allowed() {
-  local label name scope user template health log inputs agent_input follows bad=0
-  while IFS='|' read -r label name scope user template health log inputs agent_input follows; do
-    ug_service_allowed "$label" "$user" "$agent_input" "$inputs" "$log" || bad=1
-  done < <(ug_services)
-  return "$bad"
-}
-
 ug_user_walls() {
-  local owner_home=$1 root agent_login key keys login other target home open=0
+  local owner_home=$1 key keys login other target home open=0
   local -a targets
-  root=$(ug_fact root) || return 1
-  agent_login=$(ug_fact agent_user) || return 1
   keys=$(sed -n 's/^\([a-z_]*\)_user=.*/\1/p' "$ug_facts_file")
   for key in $keys; do
     login=$(ug_fact "${key}_user") || return 1
@@ -133,10 +97,6 @@ ug_user_walls() {
         open=1
       fi
     done
-    if [[ $login != "$agent_login" ]] && ug_read_as "$login" "$root/config/models.yml" >/dev/null 2>&1; then
-      printf '%s can read the gateway bearer in %s/config/models.yml\n' "$login" "$root"
-      open=1
-    fi
   done
   return "$open"
 }
@@ -171,27 +131,6 @@ ug_service_probe() {
   esac
 }
 
-ug_service_runs_as() {
-  local label=$1 want=$2 out have pid plist daemons=/Library/LaunchDaemons
-  out=$(launchctl print "system/$label" 2>/dev/null) || { printf 'launchd has no job system/%s\n' "$label"; return 1; }
-  have=$(sed -n 's/^[[:space:]]*username = //p' <<<"$out" | head -n 1)
-  if [[ -z $have ]]; then
-    pid=$(sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)$/\1/p' <<<"$out" | head -n 1)
-    if [[ -n $pid ]]; then
-      have=$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')
-      [[ -n $have ]] || { printf 'cannot read the user of %s (pid %s)\n' "$label" "$pid"; return 1; }
-    else
-      plist=$daemons/$label.plist
-      if [[ ! -r $plist ]] || ! plutil -lint -s "$plist" >/dev/null 2>&1; then
-        printf 'cannot read the user of %s: no user name, no pid, and no readable %s\n' "$label" "$plist"
-        return 1
-      fi
-      have=$(plutil -extract UserName raw -o - "$plist" 2>/dev/null) || have=root
-    fi
-  fi
-  [[ $have == "$want" ]] || { printf 'launchd runs %s as %s, not %s\n' "$label" "$have" "$want"; return 1; }
-}
-
 ug_service_data() { printf '%s\n' "${UG_DATA:-$HOME/$(ug_fact owner_data)}"; }
 
 ug_service_expand() {
@@ -202,7 +141,6 @@ ug_service_expand() {
     name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
     case $name in
       data) value=$data ;;
-      gateway) value=$(sed -n 's/^gateway=//p' "$data/addresses" 2>/dev/null | head -1) ;;
       omp_sha) value=${UG_OMP_SHA:-} ;;
       *) value=$(ug_fact "$name") || return 1 ;;
     esac

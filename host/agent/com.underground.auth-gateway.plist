@@ -11,7 +11,7 @@
     <string>@OMP@</string>
     <string>auth-gateway</string>
     <string>serve</string>
-    <string>--bind=@GATEWAY@</string>
+    <string>--bind=127.0.0.1:@GATEWAY_PORT@</string>
   </array>
   <key>WorkingDirectory</key>
   <string>@AUTH_HOME@</string>

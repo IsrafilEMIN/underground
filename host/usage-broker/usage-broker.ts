@@ -10,7 +10,7 @@ const ETAG = `"${GENERATION}"`;
 const MAX_WAIT_MS = 60_000;
 
 const facts = readHostFacts();
-const addressesFile = join(facts.root, "code/addresses");
+const gatewayUsageUrl = `http://${HOST}:${facts.gatewayPort}/v1/usage`;
 const gatewayTokenFile = join(homedir(), ".omp/auth-gateway.token");
 
 type Reply = { status: number; etag?: string; body?: string };
@@ -20,12 +20,9 @@ function json(status: number, value: unknown): Reply {
 }
 
 async function gatewayUsage(): Promise<Reply> {
-  const gateway = /^gateway=(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})$/m.exec(await readFile(addressesFile, "utf8"))?.[1];
-  if (gateway === undefined) return json(502, { error: "addresses file: no gateway=<ip>:<port> line" });
   const token = (await readFile(gatewayTokenFile, "utf8")).trim();
-
   if (!/^[\x21-\x7e]+$/.test(token)) return json(502, { error: "gateway token file does not hold one printable token" });
-  const reply = await fetch(`http://${gateway}/v1/usage`, { headers: { Authorization: `Bearer ${token}` } });
+  const reply = await fetch(gatewayUsageUrl, { headers: { Authorization: `Bearer ${token}` } });
   return { status: reply.status, body: await reply.text() };
 }
 

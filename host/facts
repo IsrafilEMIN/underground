@@ -5,7 +5,6 @@ agent_home=/Users/ugagent
 agent_group=ugagent
 auth_user=ugauth
 auth_home=/Users/ugauth
-omp_group=ugomp
 agent_sshd_port=2222
 auth_broker_port=8765
 usage_broker_port=18765
