@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-type HostFacts = { root: string; usageBrokerPort: number };
+type HostFacts = { usageBrokerPort: number; gatewayPort: number };
 
 const file = join(import.meta.dirname, "../facts");
 
@@ -16,7 +16,10 @@ export function readHostFacts(): HostFacts {
     if (value === undefined || value === "") throw new Error(`${file} has no ${key}`);
     return value;
   };
-  const port = Number(need("usage_broker_port"));
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${file} has usage_broker_port ${need("usage_broker_port")}, which is not a port`);
-  return { root: need("root"), usageBrokerPort: port };
+  const port = (key: string): number => {
+    const value = Number(need(key));
+    if (!Number.isInteger(value) || value < 1 || value > 65535) throw new Error(`${file} has ${key} ${need(key)}, which is not a port`);
+    return value;
+  };
+  return { usageBrokerPort: port("usage_broker_port"), gatewayPort: port("gateway_port") };
 }
