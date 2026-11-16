@@ -57,7 +57,7 @@ gh_release=$(pin gh_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]
 for name in omp ug-auth; do
   [[ ! -e $bin_dir/$name || -L $bin_dir/$name ]] || ug_die ug-setup "$bin_dir/$name is a file, not setup's link; move it away, then run setup again"
 done
-ug_services_allowed || ug_die ug-setup "host/services breaks the rule that a job that reads what the agent makes holds only what it needs or names its threat row (docs/adr/0027-enforce-least-rights.md); nothing changed"
+ug_services_allowed || ug_die ug-setup "host/services breaks the rule that a job that reads what the agent makes holds only what it needs or names its threat row; nothing changed"
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -218,7 +218,7 @@ write_addresses() {
 prepare_services() {
   install -d -m 700 "$data/state" "$data/watch"
   if [[ ! -s $data/watch/ping ]]; then
-    later+=("write the ping address of an outside check (docs/adr/0023-failures-reach-the-owner.md) into $data/watch/ping; until then, nothing outside this mac tells you when the mac or the watch stops")
+    later+=("write the ping address of an outside check into $data/watch/ping; until then, nothing outside this mac tells you when the mac or the watch stops")
   fi
   write_addresses
 }

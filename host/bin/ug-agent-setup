@@ -47,7 +47,7 @@ gh_pin=$(ug_pin "$src/VERSIONS" gh)
 gh_sha=$(ug_pin "$src/VERSIONS" gh_sha256)
 [[ $gh_pin =~ ^[0-9A-Za-z.+-]+$ ]] || ug_die ug-agent-setup "VERSIONS has no gh pin"
 [[ $gh_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no gh_sha256 pin"
-ug_services_allowed || ug_die ug-agent-setup "host/services breaks the rule that a job that reads what the agent makes holds only what it needs or names its threat row (docs/adr/0027-enforce-least-rights.md); nothing changed"
+ug_services_allowed || ug_die ug-agent-setup "host/services breaks the rule that a job that reads what the agent makes holds only what it needs or names its threat row; nothing changed"
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -402,7 +402,7 @@ start_services() {
   ug_say ok "daemons" "each runs as the user in host/services: the logins as $auth_user, the gh-broker as $broker_user"
 }
 
-walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall is open: ${walls//$'\n'/; }. A user that reads what the agent makes must hold only what its job needs (docs/adr/0027-enforce-least-rights.md); no service was loaded"
+walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall is open: ${walls//$'\n'/; }. A user that reads what the agent makes must hold only what its job needs; no service was loaded"
 ug_say ok "walls between users" "$agent_user, $auth_user, and $broker_user cannot read your home or each other's, and only $agent_user reads the gateway bearer"
 start_services
 
