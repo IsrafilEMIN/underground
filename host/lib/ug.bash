@@ -54,30 +54,6 @@ ug_services() {
   done <"$ug_services_file"
 }
 
-ug_service_field() {
-  local want=$1 field=$2 label name scope user template health log inputs agent_input follows
-  while IFS='|' read -r label name scope user template health log inputs agent_input follows || [[ -n $label ]]; do
-    [[ -n $label && $label != \#* ]] || continue
-    [[ $label == "$want" || $name == "$want" ]] || continue
-    case $field in
-      label) printf '%s\n' "$label" ;;
-      name) printf '%s\n' "$name" ;;
-      scope) printf '%s\n' "$scope" ;;
-      user) printf '%s\n' "$user" ;;
-      template) printf '%s\n' "$template" ;;
-      health) printf '%s\n' "$health" ;;
-      log) printf '%s\n' "$log" ;;
-      inputs) printf '%s\n' "$inputs" ;;
-      agent_input) printf '%s\n' "$agent_input" ;;
-      follows) printf '%s\n' "$follows" ;;
-      *) printf 'ug_service_field: no field %s\n' "$field" >&2; return 1 ;;
-    esac
-    return 0
-  done <"$ug_services_file"
-  printf 'ug_service_field: %s has no job %s\n' "$ug_services_file" "$want" >&2
-  return 1
-}
-
 ug_as() {
   local login=$1
   shift
@@ -100,12 +76,8 @@ ug_write_as() {
 ug_service_allowed() {
   local label=$1 user=$2 agent_input=$3 inputs=$4 log=$5 own tok rest ph
   local -a words
-  [[ $agent_input =~ ^(none|port|files)( U[0-9]+)?$ ]] ||
-    { printf '%s: the service table gives it the agent input "%s"; write none, port, or files, and a threat row id after it when the job runs as a user other than the agent\n' "$label" "$agent_input"; return 1; }
-  if [[ $user != agent_user && $agent_input != none && $agent_input != *" U"* ]]; then
-    printf '%s runs as %s and reads %s that the agent makes; run it as a user that holds only what it needs, or name the threat row that accepts it\n' "$label" "$user" "$agent_input"
-    return 1
-  fi
+  [[ $agent_input =~ ^(none|port|files)$ ]] ||
+    { printf '%s: the service table gives it the agent input "%s"; write none, port, or files\n' "$label" "$agent_input"; return 1; }
   own=@$(tr '[:lower:]' '[:upper:]' <<<"${user%_user}_home")@
   read -r -a words <<<"$inputs $log"
   for tok in ${words[@]+"${words[@]}"}; do
@@ -200,7 +172,7 @@ ug_service_probe() {
 }
 
 ug_service_runs_as() {
-  local label=$1 want=$2 out have pid plist daemons=${UG_LAUNCH_DAEMONS:-/Library/LaunchDaemons}
+  local label=$1 want=$2 out have pid plist daemons=/Library/LaunchDaemons
   out=$(launchctl print "system/$label" 2>/dev/null) || { printf 'launchd has no job system/%s\n' "$label"; return 1; }
   have=$(sed -n 's/^[[:space:]]*username = //p' <<<"$out" | head -n 1)
   if [[ -z $have ]]; then

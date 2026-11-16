@@ -25,7 +25,7 @@ backup_target_read() {
 backup_target_up() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" true >/dev/null 2>&1; }
 
 backup_target_wake() {
-  local tries=${UG_BACKUP_WAIT_TRIES:-30} pause=${UG_BACKUP_WAIT_SECONDS:-10} i
+  local tries=30 pause=10 i
   backup_target_up && return 0
   "${wake[@]}" >/dev/null 2>&1 || { backup_target_say "the wake command ${wake[*]} failed"; return 1; }
   woke=1

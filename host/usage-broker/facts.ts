@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type HostFacts = { root: string; usageBrokerPort: number };
+type HostFacts = { root: string; usageBrokerPort: number };
 
-export const FACTS_FILE = join(import.meta.dirname, "../facts");
+const file = join(import.meta.dirname, "../facts");
 
-export function readHostFacts(file: string = FACTS_FILE): HostFacts {
+export function readHostFacts(): HostFacts {
   const values = new Map<string, string>();
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const at = line.indexOf("=");
