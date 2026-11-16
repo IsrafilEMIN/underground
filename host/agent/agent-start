@@ -15,7 +15,6 @@ die() {
   exit 1
 }
 
-# omp calls the auth gateway with the bearer that setup keeps in a file only the agent's group reads.
 [[ -r $root/gateway-token ]] || die "cannot read $root/gateway-token; the owner runs host/bin/ug-setup"
 export UG_GATEWAY_TOKEN=$(<"$root/gateway-token")
 [[ -n $UG_GATEWAY_TOKEN ]] || die "$root/gateway-token is empty; the owner runs host/bin/ug-setup"
