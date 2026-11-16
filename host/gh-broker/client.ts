@@ -7,7 +7,6 @@ import { promisify } from "node:util";
 import {
   BUNDLE_LACKS_BASE,
   isAgentBranch,
-  isDefaultBranchName,
   isSha,
   isReply,
   isSyncPrReply,
@@ -18,7 +17,6 @@ import {
   validateRequest,
 } from "./protocol.ts";
 import type { Reply, Request, SyncPrReply, SyncReply, SyncRequest } from "./protocol.ts";
-import { sweep } from "./sweep.ts";
 
 export const SOCKET_ENV = "UG_GH_BROKER_SOCKET";
 
@@ -32,7 +30,6 @@ const USAGE = `usage:
   gh-broker pr-create <owner/repo> <agent/branch> <title> <body>
   gh-broker pr-status <owner/repo> <n>
   gh-broker ci-log <owner/repo> <n>
-  gh-broker sweep <default-branch>
 `;
 
 const execFileAsync = promisify(execFile);
@@ -195,22 +192,6 @@ async function importPr(reply: SyncPrReply, cwd: string = process.cwd()): Promis
   return 0;
 }
 
-async function runSweep(args: string[]): Promise<number> {
-  const [base] = args;
-  if (args.length !== 1 || !isDefaultBranchName(base)) {
-    process.stderr.write(`gh-broker: want sweep <default-branch>\n${USAGE}`);
-    return EXIT_USAGE;
-  }
-  try {
-    const report = await sweep({ cwd: process.cwd(), base });
-    for (const line of report.lines) process.stdout.write(`${line}\n`);
-    return 0;
-  } catch (error) {
-    process.stderr.write(`gh-broker: sweep: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
-}
-
 async function syncMain(socketPath: string, request: SyncRequest, first: Reply): Promise<{ branch: string } | number> {
   if (!isSyncReply(first)) {
     process.stderr.write("gh-broker: malformed sync reply\n");
@@ -236,7 +217,6 @@ async function syncMain(socketPath: string, request: SyncRequest, first: Reply):
 }
 
 export async function main(argv: string[], socketPath: string | undefined = process.env[SOCKET_ENV]): Promise<number> {
-  if (argv[0] === "sweep") return runSweep(argv.slice(1));
   let request: Request;
   try {
     request = await buildRequest(argv);
