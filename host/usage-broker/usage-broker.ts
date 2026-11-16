@@ -1,59 +1,46 @@
 import { createServer } from "node:http";
-import type { Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseAddresses } from "./addresses.ts";
 import { readHostFacts } from "./facts.ts";
 
-export const USAGE_BROKER_HOST = "127.0.0.1";
+const HOST = "127.0.0.1";
 const GENERATION = 1;
 const ETAG = `"${GENERATION}"`;
 const MAX_WAIT_MS = 60_000;
 
-export type UsageBrokerConfig = {
-  addressesFile: string;
-  gatewayTokenFile: string;
-  fetchImpl: typeof fetch;
-};
+const facts = readHostFacts();
+const addressesFile = join(facts.root, "code/addresses");
+const gatewayTokenFile = join(homedir(), ".omp/auth-gateway.token");
 
-export type UsageRequest = { method: string; url: string; ifNoneMatch: string | undefined };
-export type UsageReply = { status: number; etag?: string; body?: string };
+type Reply = { status: number; etag?: string; body?: string };
 
-export function defaultConfig(): UsageBrokerConfig {
-  return {
-    addressesFile: join(readHostFacts().root, "code/addresses"),
-    gatewayTokenFile: join(homedir(), ".omp/auth-gateway.token"),
-    fetchImpl: fetch,
-  };
-}
-
-function json(status: number, value: unknown): UsageReply {
+function json(status: number, value: unknown): Reply {
   return { status, body: JSON.stringify(value) };
 }
 
-async function gatewayUsage(config: UsageBrokerConfig): Promise<UsageReply> {
-  const addresses = parseAddresses(await readFile(config.addressesFile, "utf8"));
-  if (!addresses.ok) return json(502, { error: `addresses file: ${addresses.reason}` });
-  const token = (await readFile(config.gatewayTokenFile, "utf8")).trim();
+async function gatewayUsage(): Promise<Reply> {
+  const gateway = /^gateway=(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})$/m.exec(await readFile(addressesFile, "utf8"))?.[1];
+  if (gateway === undefined) return json(502, { error: "addresses file: no gateway=<ip>:<port> line" });
+  const token = (await readFile(gatewayTokenFile, "utf8")).trim();
 
   if (!/^[\x21-\x7e]+$/.test(token)) return json(502, { error: "gateway token file does not hold one printable token" });
-  const reply = await config.fetchImpl(`http://${addresses.value.gateway}/v1/usage`, { headers: { Authorization: `Bearer ${token}` } });
+  const reply = await fetch(`http://${gateway}/v1/usage`, { headers: { Authorization: `Bearer ${token}` } });
   return { status: reply.status, body: await reply.text() };
 }
 
-export async function respond(config: UsageBrokerConfig, req: UsageRequest, now: () => number = Date.now): Promise<UsageReply> {
-  const url = new URL(req.url, "http://usage-broker");
-  if (req.method === "GET" && url.pathname === "/v1/healthz") return json(200, { ok: true });
-  if (req.method === "GET" && url.pathname === "/v1/snapshot") {
-    if (req.ifNoneMatch === ETAG) {
+async function respond(method: string, rawUrl: string, ifNoneMatch: string | undefined): Promise<Reply> {
+  const url = new URL(rawUrl, "http://usage-broker");
+  if (method === "GET" && url.pathname === "/v1/healthz") return json(200, { ok: true });
+  if (method === "GET" && url.pathname === "/v1/snapshot") {
+    if (ifNoneMatch === ETAG) {
       const wait = Math.min(Math.max(Number(url.searchParams.get("wait")) || 0, 0), MAX_WAIT_MS);
       const { promise, resolve } = Promise.withResolvers<void>();
       setTimeout(resolve, wait);
       await promise;
       return { status: 304, etag: ETAG };
     }
-    const at = now();
+    const at = Date.now();
     return {
       ...json(200, {
         generation: GENERATION,
@@ -65,32 +52,25 @@ export async function respond(config: UsageBrokerConfig, req: UsageRequest, now:
       etag: ETAG,
     };
   }
-  if (req.method === "GET" && url.pathname === "/v1/usage") {
+  if (method === "GET" && url.pathname === "/v1/usage") {
     try {
-      return await gatewayUsage(config);
+      return await gatewayUsage();
     } catch (error) {
       return json(502, { error: `gateway usage failed: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
-  if (req.method === "POST" && url.pathname === "/v1/usage/observed") return { status: 204 };
+  if (method === "POST" && url.pathname === "/v1/usage/observed") return { status: 204 };
   return json(404, { error: "the usage broker serves usage only" });
 }
 
-export function createUsageBroker(config: UsageBrokerConfig): Server {
-  return createServer(async (req, res) => {
-    req.resume();
-    const header = req.headers["if-none-match"];
-    const reply = await respond(config, { method: req.method ?? "GET", url: req.url ?? "/", ifNoneMatch: Array.isArray(header) ? header[0] : header });
-    res.statusCode = reply.status;
-    if (reply.etag !== undefined) res.setHeader("etag", reply.etag);
-    if (reply.body !== undefined) res.setHeader("content-type", "application/json");
-    res.end(reply.body);
-  });
-}
-
-if (import.meta.main) {
-  const port = readHostFacts().usageBrokerPort;
-  createUsageBroker(defaultConfig()).listen(port, USAGE_BROKER_HOST, () => {
-    process.stdout.write(`usage-broker: listening on ${USAGE_BROKER_HOST}:${port}\n`);
-  });
-}
+createServer(async (req, res) => {
+  req.resume();
+  const header = req.headers["if-none-match"];
+  const reply = await respond(req.method ?? "GET", req.url ?? "/", Array.isArray(header) ? header[0] : header);
+  res.statusCode = reply.status;
+  if (reply.etag !== undefined) res.setHeader("etag", reply.etag);
+  if (reply.body !== undefined) res.setHeader("content-type", "application/json");
+  res.end(reply.body);
+}).listen(facts.usageBrokerPort, HOST, () => {
+  process.stdout.write(`usage-broker: listening on ${HOST}:${facts.usageBrokerPort}\n`);
+});

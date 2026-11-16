@@ -25,6 +25,7 @@ fi
 client_id=$(sed -n 's/.*"client_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9.]*\)".*/\1/p' "$json")
 [[ -n $client_id ]] || fail "the app config $json has no client_id"
 installation=$(sed -n 's/.*"installation_id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$json")
+[[ -n $installation ]] || fail "the app config $json has no installation_id"
 
 b64url() {
   /usr/bin/openssl base64 -A | sed 's/=*$//; s|+|-|g; s|/|_|g'
@@ -50,15 +51,6 @@ refused() {
   message=$(printf '%s' "$1" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p')
   fail "GitHub refused the request${message:+: $message}"
 }
-
-if [[ -z $installation ]]; then
-  call GET /app/installations
-  installation=$(printf '%s' "$reply" | /usr/bin/grep -o '"id": *[0-9][0-9]*' | sed -n '1s/.*: *//p')
-  if [[ -z $installation ]]; then
-    [[ $reply == *'"message"'* ]] && refused "$reply"
-    fail "the app has no installation"
-  fi
-fi
 
 call POST "/app/installations/$installation/access_tokens"
 token=$(printf '%s' "$reply" | sed -n 's/.*"token": *"\(ghs_[A-Za-z0-9_.-]*\)".*/\1/p')
