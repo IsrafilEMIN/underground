@@ -41,40 +41,7 @@ fi
 sources=$UG/sources
 if [[ -f $sources ]]; then
   unpack=$(ug_fact root)/code/bin/agent-unpack
-  target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
-  paths=() targets=()
-  while IFS= read -r line || [[ -n $line ]]; do
-    [[ -n $line && $line != '#'* ]] || continue
-    read -r path target extra <<<"$line"
-    [[ -n $path ]] || continue
-    [[ -n $target && -z $extra ]] ||
-      ug_die ug-agent "in $sources: \"$line\": a source is a repo path and a target, and nothing else"
-    case $path in
-      '~') path=$HOME ;;
-      '~/'*) path=$HOME/${path#\~/} ;;
-    esac
-    [[ $path == /* ]] || ug_die ug-agent "in $sources: $path is not an absolute path or a ~ path"
-    [[ $target =~ $target_re ]] ||
-      ug_die ug-agent "in $sources: target $target is not a plain relative path"
-    case /$target/ in
-      */./*|*/../*) ug_die ug-agent "in $sources: target $target has a . or .. component" ;;
-    esac
-    for (( n=0; n<${#targets[@]}; n++ )); do
-      prev=${targets[n]}
-      [[ $target != "$prev" ]] || ug_die ug-agent "in $sources: two sources share the target $target"
-      case $target in
-        "$prev"/*) ug_die ug-agent "in $sources: target $target lies inside $prev" ;;
-      esac
-      case $prev in
-        "$target"/*) ug_die ug-agent "in $sources: target $prev lies inside $target" ;;
-      esac
-    done
-    paths+=("$path") targets+=("$target")
-  done <"$sources"
-  for (( n=0; n<${#paths[@]}; n++ )); do
-    ( cd / && git -C "${paths[n]}" archive --format=tar HEAD | sudo -n -u "$agent" "$unpack" "${targets[n]}" ) ||
-      ug_die ug-agent "cannot sync ${paths[n]} to $agent:${targets[n]}; is it a git repository with a HEAD commit, and did host/bin/ug-setup grant the unpack helper?"
-  done
+  ug_sync_sources "$sources" "$HOME" "$agent" "$unpack" ug-agent >/dev/null || exit 1
 else
   ug_say ok sources "no $sources, so nothing is synced into $agent's home; write it to share config with $agent"
 fi
