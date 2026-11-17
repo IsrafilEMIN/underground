@@ -1,11 +1,63 @@
-#!/bin/sh
-if [ "$#" -ne 0 ]; then
-  echo "usage: agent-home-tar" >&2
+#!/bin/bash
+set -euo pipefail
+
+if [[ $# -ne 0 ]]; then
+  printf 'usage: agent-home-tar\n' >&2
   exit 64
 fi
+
 home=@AGENT_HOME@
-/usr/bin/tar -C "$home" -c --no-xattrs --exclude ./.cache --exclude ./.omp/run --exclude ./Library --exclude node_modules .
-status=$?
-if [ "$status" -gt 1 ]; then
+
+die() {
+  printf 'agent-home-tar: %s\n' "$*" >&2
+  exit 1
+}
+
+# sqlite copies the databases first so the archive holds consistent snapshots;
+# the folder sits in the home so the copies stay on the same volume, and the
+# tar never sees it because the include list below names no such member.
+tmp=$(mktemp -d "$home/.ug-backup-tar.XXXXXX") || die "could not make a temporary folder in $home"
+trap 'rm -rf -- "$tmp"' EXIT
+
+db_files=()
+if [[ -d $home/.omp/agent ]]; then
+  while IFS= read -r -d '' db; do
+    db_files+=("$db")
+  done < <(find "$home/.omp/agent" \( -path "$home/.omp/agent/cache" -o -name 'models.db*' \) -prune -o -type f -name '*.db' -print0)
+fi
+if [[ -f $home/.omp/stats.db ]]; then
+  db_files+=("$home/.omp/stats.db")
+fi
+
+# A copy is added as ./cN.db and renamed to the database's own path with -s;
+# the live database and its -wal/-shm files are excluded, and the flat name
+# keeps the exclusion for one database from matching another copy.
+args=(--no-xattrs
+  --exclude ./.omp/agent/cache
+  --exclude 'models.db*'
+  --exclude node_modules)
+copies=()
+n=0
+for db in ${db_files[@]+"${db_files[@]}"}; do
+  rel=${db#"$home/"}
+  /usr/bin/sqlite3 "$db" ".timeout 5000" ".backup '$tmp/c$n.db'" || die "could not copy the database $rel"
+  args+=(--exclude "./$rel" --exclude "./$rel-wal" --exclude "./$rel-shm")
+  args+=(-s "|^\\./c$n\\.db\$|./$rel|")
+  copies+=(-C "$tmp" "./c$n.db")
+  n=$((n + 1))
+done
+
+members=()
+if [[ -d $home/.omp/agent ]]; then
+  members+=(./.omp/agent)
+fi
+if [[ -d $home/scratch ]]; then
+  members+=(./scratch)
+fi
+
+status=0
+/usr/bin/tar -C "$home" -c "${args[@]}" ${members[@]+"${members[@]}"} ${copies[@]+"${copies[@]}"} || status=$?
+if (( status > 1 )); then
+  printf 'agent-home-tar: tar failed with status %s\n' "$status" >&2
   exit "$status"
 fi
