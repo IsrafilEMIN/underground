@@ -39,12 +39,10 @@ if [[ -n $top ]]; then
 fi
 
 sources=$UG/sources
-if [[ -f $sources ]]; then
-  unpack=$(ug_fact root)/code/bin/agent-unpack
-  ug_sync_sources "$sources" "$HOME" "$agent" "$unpack" ug-agent >/dev/null || exit 1
-else
-  ug_say ok sources "no $sources, so nothing is synced into $agent's home; write it to share config with $agent"
-fi
+[[ -f $sources ]] ||
+  ug_die ug-agent "no $sources; run: host/bin/ug-setup to create it"
+unpack=$(ug_fact root)/code/bin/agent-unpack
+ug_sync_sources "$sources" "$HOME" "$agent" "$unpack" ug-agent >/dev/null || exit 1
 
 ug_port_answers 127.0.0.1 "$port" >/dev/null 2>&1 ||
   ug_die ug-agent "the agent sshd on 127.0.0.1:$port does not answer. Check it with: sudo launchctl print system/com.underground.agent-sshd. Run host/bin/ug-setup to load it again."

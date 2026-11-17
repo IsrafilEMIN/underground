@@ -24,7 +24,7 @@ dest=$home/$target
 
 if [[ -z ${UG_UNPACK_LOCKED:-} ]]; then
   export UG_UNPACK_LOCKED=1
-  exec /usr/bin/lockf -k -t 30 "$home/.ug-unpack.lock" "$0" "$target"
+  exec /usr/bin/lockf -k -t 30 "$home/.ug-unpack.${target//\//_}.lock" "$0" "$target"
 fi
 
 mkdir -p "$dest"
