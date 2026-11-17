@@ -70,7 +70,6 @@ else
     log "the agent home was not saved (restic exit $status$(restic_hint "$status")); a failed read stores no snapshot"
   else
     log "saved the agent home to $repo"
-    # 10#: date +%j pads with a leading zero, which bash would read as octal
     subset=$(( 10#$(date +%j) % 100 + 1 ))
     err=$("$restic_bin" -r "$repo" check --read-data-subset=$subset/100 2>&1 >/dev/null) || status=$?
     if [[ $status -ne 0 ]]; then
