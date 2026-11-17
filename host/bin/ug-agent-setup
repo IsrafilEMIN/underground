@@ -85,15 +85,6 @@ make_user() {
 make_user "$agent_user" "Underground agent" /bin/sh "$agent_home"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
 
-if dscl . -read /Groups/ugomp PrimaryGroupID >/dev/null 2>&1; then
-  dseditgroup -o delete ugomp
-  ug_say changed "group ugomp" "deleted; omp belongs to root:wheel, so no group is needed to run it"
-fi
-if dscl . -read /Groups/ugagent PrimaryGroupID >/dev/null 2>&1; then
-  dseditgroup -o delete ugagent
-  ug_say changed "group ugagent" "deleted; the agent owns the few files it reads itself, so no group is needed"
-fi
-
 if [[ " $(dscl . -read /Groups/com.apple.access_ssh GroupMembership 2>/dev/null) " != *" $agent_user "* ]]; then
   dscl . -append /Groups/com.apple.access_ssh GroupMembership "$agent_user"
   ug_say changed "group com.apple.access_ssh" "$agent_user added"
@@ -305,11 +296,6 @@ sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the 
 cleanup+=("$sudoers_tmp")
 printf '%s ALL=(%s) NOPASSWD: %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" >"$sudoers_tmp"
 visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "the sudoers rules for the agent helpers do not check; nothing was installed"
-for stale in /etc/sudoers.d/underground-*; do
-  [[ -e $stale || -L $stale ]] || continue
-  rm -f "$stale"
-  ug_say changed "sudoers $stale" "deleted; one file /etc/sudoers.d/underground holds every rule now"
-done
 install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
 ug_say ok sudoers "$code/bin/agent-home-tar and $code/bin/agent-unpack, run as $agent_user, and sudo for $owner to run them (/etc/sudoers.d/underground)"
 

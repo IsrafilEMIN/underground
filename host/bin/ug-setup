@@ -135,7 +135,7 @@ setup_backup() {
 
 setup_sources() {
   if [[ ! -f $data/sources ]]; then
-    later+=("write $data/sources with one line per config folder to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp runs the agent with no config of yours")
+    later+=("write $data/sources with one line per config folder to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp does not update the agent's config")
   fi
 }
 
