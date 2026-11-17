@@ -47,4 +47,16 @@ ug_sync_sources "$sources" "$HOME" "$agent" "$unpack" ug-agent >/dev/null || exi
 ug_port_answers 127.0.0.1 "$port" >/dev/null 2>&1 ||
   ug_die ug-agent "the agent sshd on 127.0.0.1:$port does not answer. Check it with: sudo launchctl print system/com.underground.agent-sshd. Run host/bin/ug-setup to load it again."
 
-exec ssh -tt -p "$port" -i "$key" -o IdentitiesOnly=yes -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes -o LogLevel=ERROR -o SendEnv=UG_REPO "$agent@127.0.0.1" -- "$@"
+notices=
+add_notice() { notices=${notices:+$notices$'\n'}$1; }
+last=$(head -n 1 "$UG/backup/last" 2>/dev/null) || last=
+if [[ ! $last =~ ^[0-9]+$ ]]; then
+  add_notice "no good backup yet; read $UG/backup/backup.log"
+else
+  now=$(date +%s)
+  if (( now - last > 172800 )); then
+    add_notice "the last good backup is $(( (now - last) / 86400 )) days old; read $UG/backup/backup.log"
+  fi
+fi
+export UG_NOTICES=$notices
+exec ssh -tt -p "$port" -i "$key" -o IdentitiesOnly=yes -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes -o LogLevel=ERROR -o SendEnv=UG_REPO -o SendEnv=UG_NOTICES "$agent@127.0.0.1" -- "$@"

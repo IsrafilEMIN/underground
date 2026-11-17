@@ -9,6 +9,8 @@ fi
 src=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 # shellcheck source=host/lib/ug.bash disable=SC1091
 source "$src/host/lib/ug.bash"
+# shellcheck source=host/lib/backup-target.bash disable=SC1091
+source "$src/host/lib/backup-target.bash"
 data="$HOME/$(ug_fact owner_data)"
 real=$(cd "$data" 2>/dev/null && pwd -P) || real=$data
 case $src/ in
@@ -122,15 +124,55 @@ stage_gh() {
 
 setup_backup() {
   local backup="$data/backup"
+  local fix="write $backup/config with a repo=sftp:<user>@<host>:<path> line, plus optional wake=<command> and sleep=<command> lines; wake runs when the host does not answer ssh, sleep after each backup; until then, no backup runs"
+  local err='' answer='' wake_in='' sleep_in='' tmp restic_bin status=0 out
   install -d -m 700 "$backup"
   if [[ ! -s $backup/password ]]; then
     (umask 077 && openssl rand -base64 32 >"$backup/password") || ug_die ug-setup "cannot write $backup/password"
     ug_say changed backup "made the password $backup/password"
     later+=("keep a copy of $backup/password in your password manager; without it, the backup cannot be opened after a loss of this mac")
   fi
-  if [[ ! -f $backup/config ]]; then
-    later+=("write $backup/config in the format that backup_target_read in host/lib/backup-target.bash reads; until then, no backup runs")
+  if [[ ! -f $backup/config ]] || ! err=$(backup_target_read "$backup/config" 2>&1 >/dev/null); then
+    [[ -z $err ]] || ug_say ok backup "${err//$'\n'/ }"
+    if [[ -t 0 ]]; then
+      read -r -p "backup repository address, as sftp:<user>@<host>:<path>, empty for none: " answer || answer=''
+      if [[ -n $answer ]]; then
+        read -r -p "command to wake the backup host when it does not answer ssh, empty for none: " wake_in || wake_in=''
+        read -r -p "command to put the backup host back to sleep after a backup, empty for none: " sleep_in || sleep_in=''
+        tmp=$(mktemp "$backup/.config.XXXXXX")
+        cleanup+=("$tmp")
+        {
+          printf 'repo=%s\n' "$answer"
+          [[ -z $wake_in ]] || printf 'wake=%s\n' "$wake_in"
+          [[ -z $sleep_in ]] || printf 'sleep=%s\n' "$sleep_in"
+        } >"$tmp"
+        if err=$(backup_target_read "$tmp" 2>&1 >/dev/null); then
+          put "$tmp" "$backup/config" 600
+          ug_say changed backup "wrote $backup/config with $answer"
+        else
+          ug_say ok backup "those answers are not a valid config: ${err//$'\n'/ }; nothing was written"
+          later+=("$fix")
+        fi
+      else
+        later+=("$fix")
+      fi
+    else
+      later+=("$fix")
+    fi
   fi
+  backup_target_read "$backup/config" >/dev/null 2>&1 || return 0
+  if ! backup_target_up; then
+    ug_say ok backup "$target does not answer ssh, or the ssh key does not work without a prompt; run ssh-keygen -t ed25519, then ssh-copy-id $target"
+    return 0
+  fi
+  restic_bin="$data/restic/$restic_pin/restic"
+  out=$(RESTIC_PASSWORD_FILE="$backup/password" "$restic_bin" -r "$repo" cat config 2>&1 >/dev/null) || status=$?
+  case $status in
+    0) ug_say ok backup "$repo is reachable and the backup password opens it" ;;
+    10) ug_say ok backup "$repo is reachable but holds no repository yet; ug-backup creates it on its first run" ;;
+    12) ug_say ok backup "$repo does not open with $backup/password; the backup password is not the one the repository was created with" ;;
+    *) ug_say ok backup "restic could not check $repo (exit $status): ${out//$'\n'/ }" ;;
+  esac
 }
 
 check_source() {

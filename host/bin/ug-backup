@@ -57,12 +57,35 @@ elif [[ ! -x $agent_tar ]]; then
   log "the agent home reader $agent_tar is missing; run: host/bin/ug-setup"
   status=1
 else
+  status=0
+  err=$("$restic_bin" -r "$repo" unlock 2>&1 >/dev/null) || status=$?
+  if [[ $status -eq 0 ]]; then
+    log "cleared any stale locks in $repo"
+  else
+    log "clearing stale locks in $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }; going on"
+  fi
   "$restic_bin" -r "$repo" backup --quiet --tag ug-agent --stdin-filename ug-agent-home.tar --stdin-from-command -- sudo -n -u "$agent_user" "$agent_tar"
   status=$?
-  if [[ $status -eq 0 ]]; then
-    log "saved the agent home to $repo"
-  else
+  if [[ $status -ne 0 ]]; then
     log "the agent home was not saved (restic exit $status$(restic_hint "$status")); a failed read stores no snapshot"
+  else
+    log "saved the agent home to $repo"
+    # 10#: date +%j pads with a leading zero, which bash would read as octal
+    subset=$(( 10#$(date +%j) % 100 + 1 ))
+    err=$("$restic_bin" -r "$repo" check --read-data-subset=$subset/100 2>&1 >/dev/null) || status=$?
+    if [[ $status -ne 0 ]]; then
+      log "checking the repo $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }"
+    else
+      log "checked data subset $subset/100 of $repo"
+      tmp=$(mktemp "$backup/.last.XXXXXX") || tmp=
+      if [[ -n $tmp ]] && date +%s >"$tmp" && mv -f "$tmp" "$backup/last"; then
+        log "recorded the run in $backup/last"
+      else
+        [[ -z $tmp ]] || rm -f "$tmp"
+        log "cannot record the run in $backup/last"
+        status=1
+      fi
+    fi
   fi
 fi
 
