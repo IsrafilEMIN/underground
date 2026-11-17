@@ -100,23 +100,20 @@ install_restic() {
 }
 
 stage_gh() {
-  local dir="$data/gh/$gh_pin" dest tmp unpacked have url name="gh_${gh_pin}_macOS_arm64" old
-  dest="$dir/gh"
-  if [[ -f $dest && ! -L $dest ]]; then
+  local dir="$data/gh/$gh_pin" dest tmp have url old
+  dest="$dir/gh.zip"
+  if [[ -f $dest && ! -L $dest && $(ug_sha256 "$dest") == "$gh_zip_sha" ]]; then
     ug_say same "gh $gh_pin" "in place in $dest"
   else
-    url="$gh_release/v$gh_pin/$name.zip"
+    url="$gh_release/v$gh_pin/gh_${gh_pin}_macOS_arm64.zip"
     tmp=$(mktemp "$data/gh/.download.XXXXXX")
-    unpacked=$(mktemp -d "$data/gh/.unpacked.XXXXXX")
-    cleanup+=("$tmp" "$unpacked")
+    cleanup+=("$tmp")
     curl -fsSL --proto '=https' --retry 3 -o "$tmp" "$url" || ug_die ug-setup "download of $url failed"
     have=$(ug_sha256 "$tmp")
     [[ $have == "$gh_zip_sha" ]] || ug_die ug-setup "gh $gh_pin from $url has SHA-256 $have, want $gh_zip_sha; nothing changed"
-    unzip -q "$tmp" "$name/bin/gh" -d "$unpacked" || ug_die ug-setup "unzip of $url failed; nothing changed"
-    chmod 555 "$unpacked/$name/bin/gh"
     install -d -m 700 "$dir"
-    mv -f "$unpacked/$name/bin/gh" "$dest"
-    ug_say changed "gh $gh_pin" "downloaded and checked; the root step installs it for the agent"
+    mv -f "$tmp" "$dest"
+    ug_say changed "gh $gh_pin" "downloaded and checked; the root step checks it again and installs it for the agent"
   fi
   for old in "$data"/gh/*; do
     [[ $old == "$dir" ]] || rm -rf "$old"

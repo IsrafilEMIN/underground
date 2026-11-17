@@ -40,6 +40,8 @@ omp_sha=$(ug_pin "$src/VERSIONS" omp_sha256)
 [[ $omp_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no omp_sha256 pin"
 gh_pin=$(ug_pin "$src/VERSIONS" gh)
 [[ $gh_pin =~ ^[0-9A-Za-z.+-]+$ ]] || ug_die ug-agent-setup "VERSIONS has no gh pin"
+gh_zip_sha=$(ug_pin "$src/VERSIONS" gh_zip_sha256)
+[[ $gh_zip_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no gh_zip_sha256 pin"
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -122,19 +124,24 @@ ug_say ok "$root/omp" "omp $omp_pin installed, old versions removed"
 
 gh_dir=$root/gh/$gh_pin
 gh_bin=$gh_dir/gh
-gh_staged=$data/gh/$gh_pin/gh
+gh_zip=$data/gh/$gh_pin/gh.zip
 install -d -m 755 -o root -g wheel "$root/gh" "$gh_dir"
-[[ -f $gh_staged && ! -L $gh_staged ]] || ug_die ug-agent-setup "no gh $gh_pin in $gh_staged; run host/bin/ug-setup, which downloads it and checks its SHA-256"
+[[ -f $gh_zip && ! -L $gh_zip ]] || ug_die ug-agent-setup "no gh $gh_pin in $gh_zip; run host/bin/ug-setup, which downloads it"
+gh_unpacked=$(mktemp -d)
+cleanup+=("$gh_unpacked")
+cat "$gh_zip" >"$gh_unpacked/gh.zip"
+[[ $(ug_sha256 "$gh_unpacked/gh.zip") == "$gh_zip_sha" ]] || ug_die ug-agent-setup "$gh_zip does not have the pinned SHA-256; run host/bin/ug-setup, which downloads it again"
+unzip -q "$gh_unpacked/gh.zip" "gh_${gh_pin}_macOS_arm64/bin/gh" -d "$gh_unpacked" || ug_die ug-agent-setup "unzip of $gh_zip failed; nothing changed"
 gh_tmp=$(mktemp "$gh_dir/.gh.XXXXXX")
 cleanup+=("$gh_tmp")
-cat "$gh_staged" >"$gh_tmp"
+cat "$gh_unpacked/gh_${gh_pin}_macOS_arm64/bin/gh" >"$gh_tmp"
 chown root:wheel "$gh_tmp"
 chmod 555 "$gh_tmp"
 mv -f "$gh_tmp" "$gh_bin"
 for old in "$root"/gh/*; do
   [[ $old == "$gh_dir" ]] || rm -rf "$old"
 done
-ug_say ok "$root/gh" "gh $gh_pin copied from $gh_staged for the agent, old versions removed"
+ug_say ok "$root/gh" "gh $gh_pin checked against its pin and installed for the agent, old versions removed"
 
 rendered_dir=$(mktemp -d)
 cleanup+=("$rendered_dir")
