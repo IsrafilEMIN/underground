@@ -30,8 +30,6 @@ ug_say() {
   printf '%s%s:%s %s%s%s\n' "$(ug_paint 1 bold)" "$subject" "$(ug_paint 1 off)" "${color:+$(ug_paint 1 "$color")}" "$text" "$(ug_paint 1 off)"
 }
 
-ug_service_kind() { if [[ $1 == unchanged* ]]; then printf 'same\n'; else printf 'changed\n'; fi; }
-
 ug_pin() { sed -n "s/^$2=//p" "$1"; }
 
 ug_facts_file=${BASH_SOURCE[0]%/*}/../facts
@@ -46,11 +44,11 @@ ug_fact() {
 ug_services_file=${BASH_SOURCE[0]%/*}/../services
 
 ug_services() {
-  local want=${1:-} label name scope user template health log inputs follows
-  while IFS='|' read -r label name scope user template health log inputs follows || [[ -n $label ]]; do
+  local want=${1:-} label name scope user template health log
+  while IFS='|' read -r label name scope user template health log || [[ -n $label ]]; do
     [[ -n $label && $label != \#* ]] || continue
     [[ -z $want || $scope == "$want" ]] || continue
-    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log" "$inputs" "$follows"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log"
   done <"$ug_services_file"
 }
 
@@ -141,38 +139,12 @@ ug_service_expand() {
     name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
     case $name in
       data) value=$data ;;
-      omp_sha) value=${UG_OMP_SHA:-} ;;
       *) value=$(ug_fact "$name") || return 1 ;;
     esac
     [[ -n $value ]] || { printf 'ug_service_expand: no value for %s\n' "${BASH_REMATCH[0]}" >&2; return 1; }
     text=${text/"${BASH_REMATCH[0]}"/$value}
   done
   printf '%s\n' "$text"
-}
-
-ug_service_inputs() {
-  local login=$1 tokens=$2 tok opt m
-  local -a matches keep
-  for tok in $tokens; do
-    opt=0
-    [[ $tok != \?* ]] || { opt=1; tok=${tok#\?}; }
-    tok=$(ug_service_expand "$tok") || return 1
-    shopt -s nullglob
-    # shellcheck disable=SC2206
-    matches=( $tok )
-    shopt -u nullglob
-    if (( ${#matches[@]} == 0 )); then
-      (( opt )) || matches=( "$tok" )
-    elif (( opt )); then
-      keep=()
-      for m in "${matches[@]}"; do
-        if ug_as "$login" /bin/test -e "$m"; then keep+=("$m"); fi
-      done
-      matches=( ${keep[@]+"${keep[@]}"} )
-    fi
-    (( ${#matches[@]} > 0 )) && printf '%s\n' "${matches[@]}"
-  done
-  return 0
 }
 
 ug_die() {
@@ -295,17 +267,6 @@ ug_stop_service() {
   return 1
 }
 
-ug_restart_service() {
-  local domain=$1 label=$2 plist=$3 err i
-  ug_stop_service "$domain/$label" || return 1
-  for (( i = 0; i < 5; i++ )); do
-    err=$(launchctl bootstrap "$domain" "$plist" 2>&1) && return 0
-    sleep 1
-  done
-  printf 'launchctl bootstrap of %s failed: %s\n' "$label" "$err"
-  return 1
-}
-
 ug_wait() {
   local tries=$1 i
   shift
@@ -326,66 +287,11 @@ ug_sshd_denies_agent() {
   /usr/sbin/sshd -T -f "$1" -o HostKey="$2" -C "user=$agent,host=localhost,addr=127.0.0.1" 2>/dev/null | grep -qix "denyusers $agent"
 }
 
-ug_fingerprint() {
-  local login=$1 plist=$2 out f
-  shift 2
-  out=$(set -o pipefail; { cat -- "$plist" && for f in "$@"; do ug_read_as "$login" "$f" || exit 1; done; } | openssl dgst -sha256 -r) || return 1
-  printf '%s\n' "${out%% *}"
-}
-
 ug_ensure_owner_mode() {
   local file=$1 owner=$2 mode=$3
   [[ $(stat -f '%Su:%Sg %Mp%Lp' "$file") != "$owner $mode" ]] || return 0
   chown "$owner" "$file" && chmod "$mode" "$file" || return 1
   [[ $(stat -f '%Su:%Sg %Mp%Lp' "$file") == "$owner $mode" ]]
-}
-
-ug_trusted_path() {
-  local path=$1 part=$1 owner mode acl rule=' allow [^'$'\n'']*(write|add_file|add_subdirectory|delete|append|chown)'
-  shift
-  [[ $path == /* ]] || { printf '%s is not an absolute path\n' "$path"; return 1; }
-  while :; do
-    [[ ! -L $part ]] || { printf '%s is a link\n' "$part"; return 1; }
-    owner=$(stat -f '%Su %Lp' "$part" 2>/dev/null) || { printf '%s is missing or cannot be read\n' "$part"; return 1; }
-    mode=${owner#* }
-    owner=${owner% *}
-    [[ " $* " == *" $owner "* ]] || { printf '%s belongs to %s\n' "$part" "$owner"; return 1; }
-    (( (8#$mode & 8#022) == 0 )) || { printf '%s has mode %s, so its group or every user can write it\n' "$part" "$mode"; return 1; }
-    acl=$(ls -lde "$part" 2>/dev/null) || acl=""
-    [[ ! $acl =~ $rule ]] || { printf '%s has an access rule that lets a user change it: %s\n' "$part" "${BASH_REMATCH[0]# }"; return 1; }
-    [[ $part != / ]] || return 0
-    part=${part%/*}
-    part=${part:-/}
-  done
-}
-
-ug_trusted_daemon() {
-  local plist=$1 user value key why i=0 paths=() dirs
-  user=$(plutil -extract UserName raw -o - "$plist" 2>/dev/null) || user=root
-  while value=$(plutil -extract "ProgramArguments.$i" raw -o - "$plist" 2>/dev/null); do
-    [[ $value != /* ]] || paths+=("$value")
-    i=$((i + 1))
-  done
-  for key in WorkingDirectory EnvironmentVariables.HOME; do
-    ! value=$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null) || paths+=("$value")
-  done
-  if value=$(plutil -extract EnvironmentVariables.PATH raw -o - "$plist" 2>/dev/null); then
-    IFS=: read -r -a dirs <<<"$value"
-    paths+=("${dirs[@]}")
-  fi
-  [[ ${#paths[@]} -gt 0 ]] || { printf 'it names no program\n'; return 1; }
-  for value in "${paths[@]}"; do
-    why=$(ug_trusted_path "$value" root "$user") || { printf 'it runs as %s and uses %s, but %s\n' "$user" "$value" "$why"; return 1; }
-  done
-  for key in StandardOutPath StandardErrorPath; do
-    value=$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null) || continue
-    [[ ! -L $value ]] || { printf 'it logs to %s, which is a link\n' "$value"; return 1; }
-    if [[ -e $value ]]; then
-      why=$(stat -f %Su "$value") || why=unknown
-      [[ $why == root || $why == "$user" ]] || { printf 'it logs to %s, which belongs to %s\n' "$value" "$why"; return 1; }
-    fi
-    why=$(ug_trusted_path "${value%/*}" root) || { printf 'it logs to %s, but %s; launchd opens the log before the job runs, so only root may own its folder\n' "$value" "$why"; return 1; }
-  done
 }
 
 ug_render() {
@@ -402,17 +308,16 @@ ug_render() {
 }
 
 ug_ensure_service() {
-  local domain=$1 label=$2 rendered=$3 plist=$4 stamp=$5 fp=$6
-  shift 6
-  if [[ -f $stamp && $(<"$stamp") == "$fp" ]] && launchctl print "$domain/$label" >/dev/null 2>&1 && ug_wait 1 "$@"; then
-    printf 'unchanged and answers, so not restarted\n'
-    return 0
-  fi
-  rm -f "$stamp"
+  local domain=$1 label=$2 rendered=$3 plist=$4 err i
+  shift 4
   install -m 644 "$rendered" "$plist" || { printf 'cannot install %s\n' "$plist"; return 1; }
-  ug_restart_service "$domain" "$label" "$plist" || return 1
+  ug_stop_service "$domain/$label" || return 1
+  for (( i = 0; i < 5; i++ )); do
+    err=$(launchctl bootstrap "$domain" "$plist" 2>&1) && break
+    sleep 1
+  done
+  (( i < 5 )) || { printf 'launchctl bootstrap of %s failed: %s\n' "$label" "$err"; return 1; }
   ug_wait 60 "$@" || { printf '%s does not answer 30 s after it loaded\n' "$label"; return 1; }
-  printf '%s\n' "$fp" >"$stamp"
   printf 'restarted, answers\n'
 }
 
