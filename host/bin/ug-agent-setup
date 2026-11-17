@@ -85,11 +85,9 @@ make_user() {
 make_user "$agent_user" "Underground agent" /bin/sh "$agent_home"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
 
-if [[ " $(dscl . -read /Groups/com.apple.access_ssh GroupMembership 2>/dev/null) " != *" $agent_user "* ]]; then
-  dscl . -append /Groups/com.apple.access_ssh GroupMembership "$agent_user"
-  ug_say changed "group com.apple.access_ssh" "$agent_user added"
-else
-  ug_say same "group com.apple.access_ssh" "$agent_user in place"
+if [[ " $(dscl . -read /Groups/com.apple.access_ssh GroupMembership 2>/dev/null) " == *" $agent_user "* ]]; then
+  dseditgroup -o edit -d "$agent_user" -t user com.apple.access_ssh
+  ug_say changed "group com.apple.access_ssh" "$agent_user removed; the private sshd does not need it, and Remote Login must not let $agent_user in"
 fi
 
 omp_dir=$root/omp/$omp_pin
