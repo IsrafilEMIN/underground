@@ -280,8 +280,6 @@ def rule(t): [.rules[]? | select(.type == t)][0];
 ] | join("; ")
 '
 
-# Every CODEOWNERS line of <text> must name only @<login>, and * must be one of them.
-# <where> names the file in the messages; <open> opens them, empty when <where> opens them.
 ug_check_codeowners() {
   local text=$1 login=$2 where=$3 open=${4:-} line="" pattern="" owners="" star=0
   while read -r pattern owners || [[ -n $pattern ]]; do
@@ -292,8 +290,6 @@ ug_check_codeowners() {
   [[ $star == 1 ]] || { printf '%s%s has no line "* @%s", so some files need no approval\n' "$open" "$where" "$login" >&2; return 1; }
 }
 
-# One active branch ruleset of <repo> must make main need your approval with nothing else on it.
-# Prints the gaps and returns 1 on failure; on success sets ug_ruleset_id to the ruleset that holds.
 ug_ruleset_id=""
 ug_check_rulesets() {
   local repo=$1 open=${2:-} ids id json gaps report=""
@@ -328,8 +324,6 @@ ug_check_main_rule() {
   ug_say same "main rule" "GitHub merges to main of $repo only with the approval of @$login (ruleset $ug_ruleset_id)"
 }
 
-# The rule on main of a repo that is not checked out here, read through the API.
-# <login> is the login that must approve; prints the problems and returns 1, never exits.
 ug_check_repo_rule() {
   local repo=$1 login=$2 name text="" where=""
   for name in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do

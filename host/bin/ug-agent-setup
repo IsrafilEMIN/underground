@@ -219,8 +219,6 @@ mv "$code.new" "$code"
 rm -rf "$code.old"
 ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, ug-notices.ts, authorized_keys, bin/ (omp, gh, gh-app-token, agent-home-tar, agent-unpack), usage-broker/"
 
-# Only the app can say which repos it may write to, so the listing is taken as $agent_user, while
-# host/bin/ug-setup reads the rules with the login of $owner, which alone can read a bypass list.
 app_repos=$data/app-repos
 app_tmp=$(mktemp "$data/.app-repos.XXXXXX") || ug_die ug-agent-setup "cannot make a temp file for $app_repos"
 cleanup+=("$app_tmp")
