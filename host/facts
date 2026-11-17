@@ -2,7 +2,6 @@ root=/Library/Underground
 owner_data=.local/share/underground
 agent_user=ugagent
 agent_home=/Users/ugagent
-agent_group=ugagent
 auth_user=ugauth
 auth_home=/Users/ugauth
 agent_sshd_port=2222

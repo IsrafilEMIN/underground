@@ -4,10 +4,11 @@ set -eo pipefail
 TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)
 export HOME=@AGENT_HOME@ TMPDIR PATH=@ROOT@/code/bin:/usr/bin:/bin:/usr/sbin:/sbin
 export OMP_AUTH_BROKER_URL=http://127.0.0.1:@USAGE_BROKER_PORT@ OMP_AUTH_BROKER_TOKEN=usage-only
-export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1='!f() { t=$("@ROOT@/code/bin/gh-app-token") || exit 1; echo username=x-access-token; echo "password=$t"; }; f' GIT_CONFIG_KEY_2=core.hooksPath GIT_CONFIG_VALUE_2=/dev/null
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1='!f() { t=$("@ROOT@/code/bin/gh-app-token") || exit 1; echo username=x-access-token; echo "password=$t"; }; f'
 
 root=@ROOT@
 code=$root/code
+config_git=$root/config.git
 agent=$HOME/.omp/agent
 
 die() {
@@ -24,8 +25,6 @@ omp_bin=$(readlink "$code/bin/omp") || die "no $code/bin/omp; the owner runs hos
 # The agent's ssh login has no desktop session, so macOS logs a failed text-checking service lookup to stderr many times a session.
 # grep ignores SIGINT so that a Ctrl-C cannot close omp's stderr.
 start_omp() {
-  unset GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
-  export GIT_CONFIG_COUNT=2
   { "$omp_bin" "$@" 2>&1 1>&3 3>&- | { trap '' INT; /usr/bin/grep --line-buffered -v -F 'dataFromCheckingString received error' >&2 || true; }; } 3>&1
   exit 0
 }
@@ -36,26 +35,31 @@ for dir in "$HOME/.omp" "$agent"; do
 done
 
 (
-  names=()
-  staged=()
-  while IFS= read -r name; do
-    [[ -n $name ]] || continue
-    names+=("$name")
-    if [[ -e $root/config/$name ]]; then staged+=("$name"); fi
-  done <"$code/config-names"
-  rm -rf -- "${names[@]/#/$agent/}"
-  if (( ${#staged[@]} > 0 )); then cp -cR -- "${staged[@]/#/$root/config/}" "$agent/"; fi
+  g=(git -c "safe.directory=$config_git" -C "$config_git")
+  new_rev=$("${g[@]}" rev-parse --verify --quiet refs/heads/main) ||
+    die "no config yet: push your config repo with git -C <your config repo> push $config_git HEAD:main"
+  old_rev=$(cat "$agent/.ug-config-rev" 2>/dev/null) || old_rev=
+  if [[ $new_rev != "$old_rev" ]]; then
+    while IFS= read -r -d '' name; do
+      if [[ -n $name ]]; then rm -rf -- "$agent/$name"; fi
+    done < <(
+      if [[ -n $old_rev ]]; then "${g[@]}" ls-tree --name-only -z "$old_rev" 2>/dev/null || true; fi
+      "${g[@]}" ls-tree --name-only -z "$new_rev"
+    )
+    "${g[@]}" archive --format=tar "$new_rev" | tar -x -C "$agent" || die "cannot unpack config $new_rev into $agent"
+    printf '%s\n' "$new_rev" >"$agent/.ug-config-rev"
+  fi
 ) &
-copy_pid=$!
+config_pid=$!
 
-copied() {
-  wait "$copy_pid" || die "the config copy failed, so no session starts"
+synced_config() {
+  wait "$config_pid" || die "the config sync failed, so no session starts"
 }
 
 if [[ -z ${UG_REPO:-} ]]; then
   mkdir -p "$HOME/scratch"
   cd "$HOME/scratch"
-  copied
+  synced_config
   start_omp "$@"
 fi
 [[ $UG_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "UG_REPO has a value that is not owner/name"
@@ -69,30 +73,23 @@ if [[ ! -d $clone/.git ]]; then
 fi
 cd "$clone"
 
-busy() {
-  git rev-parse -q --verify HEAD >/dev/null || die "the clone is busy with its first sync; start the session again in a moment"
-  printf 'agent-start: another session start holds the clone of %s; this session starts from the main that the clone has\n' "$UG_REPO" >&2
-  copied
-  start_omp "$@"
-}
-
-sync_status=0
-/usr/bin/lockf -k -t 3 .git/ug-sync.lock git fetch --quiet --no-tags origin || sync_status=$?
-(( sync_status != 75 )) || busy "$@"
-(( sync_status == 0 )) || {
+fetch_status=0
+/usr/bin/lockf -k -t 30 .git/ug-sync.lock git fetch --quiet --no-tags origin || fetch_status=$?
+(( fetch_status != 75 )) || die "another session holds the fetch of $UG_REPO for over 30 s; start the session again in a moment"
+(( fetch_status == 0 )) || {
   printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
   exit 69
 }
-remote=$(git ls-remote --symref origin HEAD) || remote=
-base=$(printf '%s\n' "$remote" | sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]].*|\1|p')
+base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+if [[ -z $base ]]; then
+  git remote set-head origin --auto >/dev/null 2>&1 || true
+  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+fi
 [[ -n $base ]] || {
   printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
   exit 69
 }
 
-checkout_status=0
-/usr/bin/lockf -k -t 3 .git/ug-sync.lock git checkout -q --detach "origin/$base" || checkout_status=$?
-(( checkout_status != 75 )) || busy "$@"
-(( checkout_status == 0 )) || exit "$checkout_status"
-copied
+git update-ref --no-deref HEAD "$base" || die "the clone of $UG_REPO cannot point its HEAD at $base; is that repository empty?"
+synced_config
 start_omp "$@"

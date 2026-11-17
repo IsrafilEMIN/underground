@@ -44,11 +44,9 @@ omp_pin=$(pin omp '^[0-9A-Za-z.+-]+$')
 omp_sha=$(pin omp_sha256 '^[0-9a-f]{64}$')
 omp_release=$(pin omp_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download$')
 restic_pin=$(pin restic '^[0-9A-Za-z.+-]+$')
-restic_sha=$(pin restic_sha256 '^[0-9a-f]{64}$')
 restic_bz2_sha=$(pin restic_bz2_sha256 '^[0-9a-f]{64}$')
 restic_release=$(pin restic_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download$')
 gh_pin=$(pin gh '^[0-9A-Za-z.+-]+$')
-gh_sha=$(pin gh_sha256 '^[0-9a-f]{64}$')
 gh_zip_sha=$(pin gh_zip_sha256 '^[0-9a-f]{64}$')
 gh_release=$(pin gh_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download$')
 
@@ -63,7 +61,7 @@ trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
 omp_stage=""
 stage_omp() {
   local dest="$root/omp/$omp_pin/omp" have url
-  if [[ -f $dest && -f $dest.sha256 && $(<"$dest.sha256") == "$omp_sha" ]]; then
+  if [[ -f $dest && $(ug_sha256 "$dest") == "$omp_sha" ]]; then
     ug_say same "omp $omp_pin" "in place in $dest"
     return 0
   fi
@@ -83,7 +81,7 @@ install -d -m 700 "$data" "$data/restic" "$data/gh"
 install_restic() {
   local dir="$data/restic/$restic_pin" dest tmp bin have url
   dest="$dir/restic"
-  if [[ -f $dest && ! -L $dest ]] && [[ $(ug_sha256 "$dest") == "$restic_sha" ]]; then
+  if [[ -f $dest && ! -L $dest ]]; then
     ug_say same "restic $restic_pin" "in place"
     return 0
   fi
@@ -95,8 +93,6 @@ install_restic() {
   have=$(ug_sha256 "$tmp")
   [[ $have == "$restic_bz2_sha" ]] || ug_die ug-setup "restic $restic_pin from $url has SHA-256 $have, want $restic_bz2_sha; nothing changed"
   bunzip2 -c "$tmp" >"$bin" || ug_die ug-setup "bunzip2 of $url failed; nothing changed"
-  have=$(ug_sha256 "$bin")
-  [[ $have == "$restic_sha" ]] || ug_die ug-setup "restic $restic_pin unpacked has SHA-256 $have, want $restic_sha; nothing changed"
   chmod 555 "$bin"
   install -d -m 700 "$dir"
   mv -f "$bin" "$dest"
@@ -104,25 +100,20 @@ install_restic() {
 }
 
 stage_gh() {
-  local dir="$data/gh/$gh_pin" dest tmp unpacked have url name="gh_${gh_pin}_macOS_arm64" old
-  dest="$dir/gh"
-  if [[ -f $dest && ! -L $dest ]] && [[ $(ug_sha256 "$dest") == "$gh_sha" ]]; then
+  local dir="$data/gh/$gh_pin" dest tmp have url old
+  dest="$dir/gh.zip"
+  if [[ -f $dest && ! -L $dest && $(ug_sha256 "$dest") == "$gh_zip_sha" ]]; then
     ug_say same "gh $gh_pin" "in place in $dest"
   else
-    url="$gh_release/v$gh_pin/$name.zip"
+    url="$gh_release/v$gh_pin/gh_${gh_pin}_macOS_arm64.zip"
     tmp=$(mktemp "$data/gh/.download.XXXXXX")
-    unpacked=$(mktemp -d "$data/gh/.unpacked.XXXXXX")
-    cleanup+=("$tmp" "$unpacked")
+    cleanup+=("$tmp")
     curl -fsSL --proto '=https' --retry 3 -o "$tmp" "$url" || ug_die ug-setup "download of $url failed"
     have=$(ug_sha256 "$tmp")
     [[ $have == "$gh_zip_sha" ]] || ug_die ug-setup "gh $gh_pin from $url has SHA-256 $have, want $gh_zip_sha; nothing changed"
-    unzip -q "$tmp" "$name/bin/gh" -d "$unpacked" || ug_die ug-setup "unzip of $url failed; nothing changed"
-    have=$(ug_sha256 "$unpacked/$name/bin/gh")
-    [[ $have == "$gh_sha" ]] || ug_die ug-setup "gh $gh_pin unpacked has SHA-256 $have, want $gh_sha; nothing changed"
-    chmod 555 "$unpacked/$name/bin/gh"
     install -d -m 700 "$dir"
-    mv -f "$unpacked/$name/bin/gh" "$dest"
-    ug_say changed "gh $gh_pin" "downloaded and checked; the root step installs it for the agent"
+    mv -f "$tmp" "$dest"
+    ug_say changed "gh $gh_pin" "downloaded and checked; the root step checks it again and installs it for the agent"
   fi
   for old in "$data"/gh/*; do
     [[ $old == "$dir" ]] || rm -rf "$old"
@@ -203,28 +194,21 @@ write_addresses() {
 }
 
 prepare_services() {
-  install -d -m 700 "$data/state"
   write_addresses
 }
 
 # shellcheck disable=SC2154
 start_services() {
-  local label name scope user template health log tokens follows rendered out fp resolved file
-  local -a inputs=()
+  local label name scope user template health log rendered out
   install -d "$agents_dir"
-  while IFS='|' read -r label name scope user template health log tokens follows; do
-    [[ -z $follows ]] || ug_die ug-setup "the service table makes $label follow $follows, but only a daemon can follow another job"
+  while IFS='|' read -r label name scope user template health log; do
     rendered=$(mktemp "$agents_dir/.$label.XXXXXX")
     cleanup+=("$rendered")
     out=$(ug_render "$rendered" "$src/$template" "$template" -e "s|@DATA@|$data|g") || ug_die ug-setup "$out"
     ug_service_probe agent "$label" "$health" || ug_die ug-setup "setup cannot check $label; nothing changed for it"
-    resolved=$(ug_service_inputs "$(id -un)" "$tokens") || ug_die ug-setup "cannot expand the inputs of $label"
-    inputs=()
-    while IFS= read -r file; do [[ -n $file ]] && inputs+=("$file"); done <<<"$resolved"
-    fp=$(ug_fingerprint "$(id -un)" "$rendered" ${inputs[@]+"${inputs[@]}"}) || ug_die ug-setup "cannot read the inputs of $label"
-    out=$(ug_ensure_service "gui/$UID" "$label" "$rendered" "$agents_dir/$label.plist" "$data/state/$label.fingerprint" "$fp" "${ug_probe[@]}") ||
+    out=$(ug_ensure_service "gui/$UID" "$label" "$rendered" "$agents_dir/$label.plist" "${ug_probe[@]}") ||
       ug_die ug-setup "$out; read $(ug_service_expand "$log")"
-    ug_say "$(ug_service_kind "$out")" "$ug_probe_subject" "$out"
+    ug_say ok "$ug_probe_subject" "$out"
   done < <(ug_services agent)
 }
 

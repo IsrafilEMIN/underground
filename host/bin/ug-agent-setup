@@ -26,11 +26,9 @@ code=$root/code
 data=$owner_home/$(ug_fact owner_data)
 agent_user=$(ug_fact agent_user)
 agent_home=$(ug_fact agent_home)
-agent_group=$(ug_fact agent_group)
 auth_user=$(ug_fact auth_user)
 auth_home=$(ug_fact auth_home)
 agent_port=$(ug_fact agent_sshd_port)
-gateway_port=$(ug_fact gateway_port)
 bin_dir=$owner_home/.local/bin
 key_dir=$data/agent-ssh
 owner_key=$key_dir/id_ed25519
@@ -41,9 +39,9 @@ omp_sha=$(ug_pin "$src/VERSIONS" omp_sha256)
 [[ $omp_pin =~ ^[0-9A-Za-z.+-]+$ ]] || ug_die ug-agent-setup "VERSIONS has no omp pin"
 [[ $omp_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no omp_sha256 pin"
 gh_pin=$(ug_pin "$src/VERSIONS" gh)
-gh_sha=$(ug_pin "$src/VERSIONS" gh_sha256)
 [[ $gh_pin =~ ^[0-9A-Za-z.+-]+$ ]] || ug_die ug-agent-setup "VERSIONS has no gh pin"
-[[ $gh_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no gh_sha256 pin"
+gh_zip_sha=$(ug_pin "$src/VERSIONS" gh_zip_sha256)
+[[ $gh_zip_sha =~ ^[0-9a-f]{64}$ ]] || ug_die ug-agent-setup "VERSIONS has no gh_zip_sha256 pin"
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -87,25 +85,14 @@ make_user() {
 make_user "$agent_user" "Underground agent" /bin/sh "$agent_home"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
 
-make_group() {
-  local group=$1 real=$2 name
-  shift 2
-  dscl . -read "/Groups/$group" PrimaryGroupID >/dev/null 2>&1 || dseditgroup -o create -r "$real" "$group"
-  for name in "$@"; do
-    dseditgroup -o checkmember -m "$name" "$group" >/dev/null 2>&1 || dseditgroup -o edit -a "$name" -t user "$group"
-  done
-  if dseditgroup -o checkmember -m "$owner" "$group" >/dev/null 2>&1; then
-    dseditgroup -o edit -d "$owner" -t user "$group"
-  fi
-  ug_say ok "group $group" "$*, not $owner"
-}
-
 if dscl . -read /Groups/ugomp PrimaryGroupID >/dev/null 2>&1; then
   dseditgroup -o delete ugomp
   ug_say changed "group ugomp" "deleted; omp belongs to root:wheel, so no group is needed to run it"
 fi
-
-make_group "$agent_group" "Underground agent config" "$agent_user"
+if dscl . -read /Groups/ugagent PrimaryGroupID >/dev/null 2>&1; then
+  dseditgroup -o delete ugagent
+  ug_say changed "group ugagent" "deleted; the agent owns the few files it reads itself, so no group is needed"
+fi
 
 if [[ " $(dscl . -read /Groups/com.apple.access_ssh GroupMembership 2>/dev/null) " != *" $agent_user "* ]]; then
   dscl . -append /Groups/com.apple.access_ssh GroupMembership "$agent_user"
@@ -130,9 +117,6 @@ fi
 [[ -f $omp_bin && ! -L $omp_bin ]] || ug_die ug-agent-setup "no omp $omp_pin in $omp_dir; run host/bin/ug-setup, which downloads it"
 [[ $(ug_sha256 "$omp_bin") == "$omp_sha" ]] || ug_die ug-agent-setup "$omp_bin does not have the pinned SHA-256; run host/bin/ug-setup, which downloads it again"
 ug_ensure_owner_mode "$omp_bin" root:wheel 0555 || ug_die ug-agent-setup "cannot make $omp_bin root:wheel mode 0555; the agent could change the binary it runs"
-printf '%s\n' "$omp_sha" >"$omp_dir/.omp.sha256.tmp"
-install -m 444 -o root -g wheel "$omp_dir/.omp.sha256.tmp" "$omp_bin.sha256"
-rm -f "$omp_dir/.omp.sha256.tmp"
 for old in "$root"/omp/*; do
   [[ $old == "$omp_dir" ]] || rm -rf "$old"
 done
@@ -140,22 +124,24 @@ ug_say ok "$root/omp" "omp $omp_pin installed, old versions removed"
 
 gh_dir=$root/gh/$gh_pin
 gh_bin=$gh_dir/gh
-gh_staged=$data/gh/$gh_pin/gh
+gh_zip=$data/gh/$gh_pin/gh.zip
 install -d -m 755 -o root -g wheel "$root/gh" "$gh_dir"
-if [[ ! -f $gh_bin || -L $gh_bin || $(ug_sha256 "$gh_bin") != "$gh_sha" ]]; then
-  [[ -f $gh_staged && ! -L $gh_staged ]] || ug_die ug-agent-setup "no gh $gh_pin in $gh_staged; run host/bin/ug-setup, which downloads it"
-  gh_tmp=$(mktemp "$gh_dir/.gh.XXXXXX")
-  cleanup+=("$gh_tmp")
-  cat "$gh_staged" >"$gh_tmp"
-  [[ $(ug_sha256 "$gh_tmp") == "$gh_sha" ]] || ug_die ug-agent-setup "the downloaded gh does not have the pinned SHA-256; nothing changed"
-  chown root:wheel "$gh_tmp"
-  chmod 555 "$gh_tmp"
-  mv -f "$gh_tmp" "$gh_bin"
-fi
+[[ -f $gh_zip && ! -L $gh_zip ]] || ug_die ug-agent-setup "no gh $gh_pin in $gh_zip; run host/bin/ug-setup, which downloads it"
+gh_unpacked=$(mktemp -d)
+cleanup+=("$gh_unpacked")
+cat "$gh_zip" >"$gh_unpacked/gh.zip"
+[[ $(ug_sha256 "$gh_unpacked/gh.zip") == "$gh_zip_sha" ]] || ug_die ug-agent-setup "$gh_zip does not have the pinned SHA-256; run host/bin/ug-setup, which downloads it again"
+unzip -q "$gh_unpacked/gh.zip" "gh_${gh_pin}_macOS_arm64/bin/gh" -d "$gh_unpacked" || ug_die ug-agent-setup "unzip of $gh_zip failed; nothing changed"
+gh_tmp=$(mktemp "$gh_dir/.gh.XXXXXX")
+cleanup+=("$gh_tmp")
+cat "$gh_unpacked/gh_${gh_pin}_macOS_arm64/bin/gh" >"$gh_tmp"
+chown root:wheel "$gh_tmp"
+chmod 555 "$gh_tmp"
+mv -f "$gh_tmp" "$gh_bin"
 for old in "$root"/gh/*; do
   [[ $old == "$gh_dir" ]] || rm -rf "$old"
 done
-ug_say ok "$root/gh" "gh $gh_pin installed for the agent, old versions removed"
+ug_say ok "$root/gh" "gh $gh_pin checked against its pin and installed for the agent, old versions removed"
 
 rendered_dir=$(mktemp -d)
 cleanup+=("$rendered_dir")
@@ -169,17 +155,35 @@ render() {
 install -d -m 711 -o root -g wheel "$root/logs"
 
 gh_app_dir=$root/github-app
-install -d -m 750 -o root -g "$agent_group" "$gh_app_dir"
+install -d -m 500 -o "$agent_user" -g staff "$gh_app_dir"
+ug_ensure_owner_mode "$gh_app_dir" "$agent_user:staff" 0500 ||
+  ug_die ug-agent-setup "cannot make $gh_app_dir owned by $agent_user mode 0500"
 for name in github-app.json github-app.pem; do
-  [[ -e $data/$name || -L $data/$name ]] || continue
-  [[ -f $data/$name && ! -L $data/$name && $(stat -f '%l %Su' "$data/$name") == "1 $owner" ]] ||
-    ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; write it again as a plain file"
-  install -m 440 -o root -g "$agent_group" "$data/$name" "$gh_app_dir/$name"
-  rm -f "$data/$name"
-  ug_say changed "github app" "moved $name from $data into $gh_app_dir, which the agent reads and cannot change"
+  if [[ -e $data/$name || -L $data/$name ]]; then
+    [[ -f $data/$name && ! -L $data/$name && $(stat -f '%l %Su' "$data/$name") == "1 $owner" ]] ||
+      ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; write it again as a plain file"
+    install -m 400 -o "$agent_user" -g staff "$data/$name" "$gh_app_dir/$name"
+    rm -f "$data/$name"
+    ug_say changed "github app" "moved $name from $data into $gh_app_dir, which only $agent_user can read"
+  elif [[ -e $gh_app_dir/$name ]]; then
+    ug_ensure_owner_mode "$gh_app_dir/$name" "$agent_user:staff" 0400 ||
+      ug_die ug-agent-setup "cannot make $gh_app_dir/$name owned by $agent_user mode 0400"
+  fi
 done
 if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; then
   ug_say ok "github app" "no app key in $gh_app_dir yet; put the private key of the GitHub App in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
+fi
+
+config_git=$root/config.git
+if [[ ! -e $config_git ]]; then
+  git init --bare -b main "$config_git" >/dev/null || ug_die ug-agent-setup "cannot create the bare config repo $config_git"
+  ug_say changed "config.git" "created bare in $config_git"
+fi
+chown -R "$owner:staff" "$config_git" || ug_die ug-agent-setup "cannot make $config_git belong to $owner:staff"
+chmod 755 "$config_git" || ug_die ug-agent-setup "cannot make $config_git mode 755"
+ug_say ok "config.git" "every user can read it, only $owner can push"
+if ! git -c "safe.directory=$config_git" -C "$config_git" rev-parse --verify --quiet main >/dev/null; then
+  ug_say ok "config.git" "has no main yet; push your config repo with: git -C <your config repo> push $config_git HEAD:main"
 fi
 
 if [[ ! -f $root/ssh_host_ed25519_key ]]; then
@@ -223,7 +227,7 @@ ln -s "$omp_bin" "$code.new/bin/omp"
 install -m 555 -o root -g wheel "$rendered_dir/gh-app-token" "$rendered_dir/gh" "$code.new/bin/"
 install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$code.new/bin/agent-home-tar"
 install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-broker/"
-install -m 444 -o root -g wheel "$src/host/facts" "$src/host/agent/config-names" "$rendered_dir/sshd_config" "$code.new/"
+install -m 444 -o root -g wheel "$src/host/facts" "$rendered_dir/sshd_config" "$code.new/"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
 install -m 555 -o root -g wheel "$rendered_dir/agent-pf-load" "$code.new/pf-load"
 install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$code.new/"
@@ -233,7 +237,7 @@ chmod 444 "$code.new/authorized_keys/$agent_user"
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
-ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, config-names, authorized_keys, bin/, usage-broker/"
+ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, authorized_keys, bin/, usage-broker/"
 
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
@@ -241,131 +245,40 @@ install -m 600 -o "$owner" -g staff "$known_hosts.tmp" "$known_hosts"
 rm -f "$known_hosts.tmp"
 ug_say ok "known_hosts for 127.0.0.1:$agent_port" "$known_hosts"
 
-vet_item() {
-  local item=$1 base=$2 what=$3 secrets=$4 odd leak
-  odd=$(find "$item" \( -type l -o ! -type f ! -type d \) -print 2>/dev/null | head -1) || true
-  [[ -z $odd ]] || ug_die ug-agent-setup "$what has a link or a special file, which the agent must not get: ${odd#"$base/"}"
-  leak=$(grep -r -l -a -E -f "$src/host/secret-patterns" "$item" 2>/dev/null | head -1) || true
-  [[ -n $leak || ! -s $secrets ]] || leak=$(grep -r -l -a -F -f "$secrets" "$item" 2>/dev/null | head -1) || true
-  [[ -z $leak ]] || ug_die ug-agent-setup "$what file ${leak#"$base/"} holds a token or a key; the agent reads every config file, so take it out"
-}
-
-stage_config() {
-  local cfg gateway_token stage name item secrets value token_file repo base n found token_tmp
-  cfg=$(sed -n '1p' "$data/config-repo" 2>/dev/null) || true
-  [[ -n $cfg ]] || ug_die ug-agent-setup "no config repo: $data/config-repo names none"
-  cfg=${cfg/#\~/$owner_home}
-  [[ -d $cfg && ! -L $cfg ]] || ug_die ug-agent-setup "the config repo $cfg is not a folder"
-  gateway_token=$(ug_read_as "$auth_user" "$auth_home/.omp/auth-gateway.token" 2>/dev/null | tr -d '[:space:]') || gateway_token=""
-  [[ $gateway_token =~ ^[A-Za-z0-9._~+=-]{12,}$ ]] || ug_die ug-agent-setup "the gateway bearer of $auth_user (.omp/auth-gateway.token in its home) is missing or holds characters a bearer may not have"
-  token_tmp=$(mktemp "$root/.gateway-token.XXXXXX")
-  cleanup+=("$token_tmp")
-  printf '%s\n' "$gateway_token" >"$token_tmp"
-  chown "root:$agent_group" "$token_tmp"
-  chmod 440 "$token_tmp"
-  mv -f "$token_tmp" "$root/gateway-token"
-  ug_say ok "gateway bearer for the agent" "$root/gateway-token, root:$agent_group mode 0440, which omp sends to the gateway"
-  stage=$(mktemp -d) || ug_die ug-agent-setup "cannot make a temp folder for the config"
-  cleanup+=("$stage")
-  mkdir "$stage/repo" "$stage/out"
-  git -c "safe.directory=$cfg" -C "$cfg" archive --format=tar HEAD | tar -x -C "$stage/repo" || ug_die ug-agent-setup "cannot read the last commit of the config repo $cfg"
-  secrets=$stage/secrets
-  : >"$secrets"
-  for token_file in .omp/auth-broker.token .omp/auth-gateway.token; do
-    value=$(ug_read_as "$auth_user" "$auth_home/$token_file" 2>/dev/null | tr -d '[:space:]') || value=""
-    [[ ${#value} -lt 12 ]] || printf '%s\n' "$value" >>"$secrets"
-  done
-  while IFS= read -r name; do
-    item=$stage/repo/$name
-    [[ -e $item || -L $item ]] || continue
-    vet_item "$item" "$stage/repo" "the config repo" "$secrets"
-    [[ $name != models.yaml ]] || ug_die ug-agent-setup "the config repo has models.yaml; name it models.yml"
-    cp -R "$item" "$stage/out/$name"
-  done <"$src/host/agent/config-names"
-  n=0
-  if [[ -e $stage/repo/skill-repos || -L $stage/repo/skill-repos ]]; then
-    [[ -f $stage/repo/skill-repos && ! -L $stage/repo/skill-repos ]] || ug_die ug-agent-setup "skill-repos in the config repo must be a file, not a link or a folder"
-    while IFS= read -r repo || [[ -n $repo ]]; do
-      [[ -n $repo ]] || continue
-      repo=${repo/#\~/$owner_home}
-      [[ -d $repo && ! -L $repo ]] || ug_die ug-agent-setup "the skill repo $repo in the config repo's skill-repos is not a folder"
-      repo=$(cd "$repo" && pwd -P) || ug_die ug-agent-setup "cannot open the skill repo $repo"
-      [[ $repo == "$owner_home"/* ]] || ug_die ug-agent-setup "the skill repo $repo is not inside $owner_home; setup reads skill repos only from your home"
-      n=$((n + 1))
-      base=$stage/skill-repo-$n
-      mkdir "$base"
-      git -c "safe.directory=$repo" -C "$repo" archive --format=tar HEAD | tar -x -C "$base" || ug_die ug-agent-setup "cannot read the last commit of the skill repo $repo"
-      [[ ! -L $base/skills ]] || ug_die ug-agent-setup "the skill repo $repo has skills as a link, which the agent must not get"
-      [[ ! -d $base/skills ]] || base=$base/skills
-      found=0
-      for item in "$base"/*/; do
-        item=${item%/}
-        [[ -f $item/SKILL.md || -L $item ]] || continue
-        name=${item##*/}
-        vet_item "$item" "$base" "the skill repo $repo" "$secrets"
-        [[ ! -e $stage/out/skills/$name ]] || ug_die ug-agent-setup "the skill $name of the skill repo $repo is also in the config repo or an earlier skill repo; rename one"
-        mkdir -p "$stage/out/skills"
-        cp -R "$item" "$stage/out/skills/$name"
-        found=$((found + 1))
-      done
-      [[ $found -gt 0 ]] || ug_die ug-agent-setup "the last commit of the skill repo $repo has no <name>/SKILL.md at its top or under skills/"
-      ug_say ok "skill repo $repo" "$found skills"
-    done <"$stage/repo/skill-repos"
-  fi
-  [[ -f $stage/out/models.yml ]] || ug_die ug-agent-setup "the last commit of the config repo $cfg has no models.yml"
-  if grep -qE '@[A-Z_]+@' "$stage/out/models.yml"; then
-    ug_die ug-agent-setup "models.yml of the config repo still holds a placeholder; write each model with apiKey: UG_GATEWAY_TOKEN and base URL http://127.0.0.1:$gateway_port, setup fills nothing in"
-  fi
-  rm -rf "$root/config.new" "$root/config.old"
-  cp -R "$stage/out" "$root/config.new"
-  chown -R "root:$agent_group" "$root/config.new"
-  chmod -R u=rwX,g=rX,o= "$root/config.new"
-  [[ ! -e $root/config ]] || mv "$root/config" "$root/config.old"
-  mv "$root/config.new" "$root/config"
-  rm -rf "$root/config.old"
-  ug_say ok "agent config" "$root/config from $cfg, the models of $agent_user point at 127.0.0.1:$gateway_port"
-}
-
 ug_as "$auth_user" install -d -m 700 "$auth_home/.omp"
 if ! ug_as "$auth_user" /bin/test -s "$auth_home/.omp/auth-gateway.token"; then
   openssl rand -hex 32 | ug_write_as "$auth_user" "$auth_home/.omp/auth-gateway.token"
   ug_say changed "gateway bearer" "new, the .omp/auth-gateway.token of $auth_user"
 fi
-stage_config
+gateway_token=$(ug_read_as "$auth_user" "$auth_home/.omp/auth-gateway.token" 2>/dev/null | tr -d '[:space:]') || gateway_token=""
+[[ $gateway_token =~ ^[A-Za-z0-9._~+=-]{12,}$ ]] || ug_die ug-agent-setup "the gateway bearer of $auth_user (.omp/auth-gateway.token in its home) is missing or holds characters a bearer may not have"
+token_tmp=$(mktemp "$root/.gateway-token.XXXXXX")
+cleanup+=("$token_tmp")
+printf '%s\n' "$gateway_token" >"$token_tmp"
+chown "$agent_user:staff" "$token_tmp"
+chmod 400 "$token_tmp"
+mv -f "$token_tmp" "$root/gateway-token"
+ug_say ok "gateway bearer for the agent" "$root/gateway-token, owned by $agent_user mode 0400, which omp sends to the gateway"
 
 /usr/sbin/sshd -t -f "$code/sshd_config" || ug_die ug-agent-setup "sshd rejects $code/sshd_config; nothing was loaded"
 
 # shellcheck disable=SC2154
 start_services() {
-  local label name scope user template health log tokens follows rendered out fp resolved logline seen=" " restarted=" " file want key
-  local -a inputs
-  install -d -m 700 -o root -g wheel "$root/state"
-  export UG_DATA="$data" UG_OMP_SHA="$omp_bin.sha256"
-  while IFS='|' read -r label name scope user template health log tokens follows; do
+  local label name scope user template health log rendered out file want key logline
+  while IFS='|' read -r label name scope user template health log; do
     render "$template" -e "s|@OMP@|$omp_bin|g" -e "s|@ENGINE@|$engine|g"
     rendered=$rendered_dir/${template##*/}
-    out=$(ug_trusted_daemon "$rendered") || ug_die ug-agent-setup "a wall is open in the service $label: $out, so a user with fewer rights could change what it runs"
     want=$(ug_service_login "$user") || ug_die ug-agent-setup "the service table gives $label the user $user, which is not root or a key of host/facts"
     for key in StandardOutPath StandardErrorPath; do
       file=$(plutil -extract "$key" raw -o - "$rendered" 2>/dev/null) || continue
       [[ -e $file ]] || install -m 600 -o "$want" /dev/null "$file"
     done
     ug_service_probe daemon "$label" "$health" || ug_die ug-agent-setup "setup cannot check $label; nothing changed for it"
-    resolved=$(ug_service_inputs "$want" "$tokens") || ug_die ug-agent-setup "cannot expand the inputs of $label"
-    inputs=()
-    while IFS= read -r file; do [[ -n $file ]] && inputs+=("$file"); done <<<"$resolved"
-    if [[ -n $follows ]]; then
-      [[ $seen == *" $follows "* ]] || ug_die ug-agent-setup "the service table makes $label follow $follows, which is not a daemon on a line above it"
-      [[ $restarted != *" $follows "* ]] || rm -f "$root/state/$label.fingerprint"
-    fi
-    fp=$(ug_fingerprint "$want" "$rendered" ${inputs[@]+"${inputs[@]}"}) || ug_die ug-agent-setup "cannot read the inputs of $label: ${inputs[*]}"
     logline=""
     [[ -z $log ]] || logline="; read $(ug_service_expand "$log")"
-    out=$(ug_ensure_service system "$label" "$rendered" "/Library/LaunchDaemons/$label.plist" "$root/state/$label.fingerprint" "$fp" "${ug_probe[@]}") ||
+    out=$(ug_ensure_service system "$label" "$rendered" "/Library/LaunchDaemons/$label.plist" "${ug_probe[@]}") ||
       ug_die ug-agent-setup "$label: $out; check it with: $ug_probe_hint$logline"
-    seen+="$label "
-    [[ $out != restarted* ]] || restarted+="$label "
-    ug_say "$(ug_service_kind "$out")" "$ug_probe_subject" "$out"
+    ug_say changed "$ug_probe_subject" "$out"
   done < <(ug_services daemon)
 }
 
@@ -378,7 +291,7 @@ retire_daemons() {
     label=${label%.plist}
     grep -qxF "$label" <<<"$keep" && continue
     err=$(ug_stop_service "system/$label") || ug_die ug-agent-setup "$err"
-    rm -f "$plist" "$root/state/$label.fingerprint"
+    rm -f "$plist"
     ug_say changed "service $label" "booted out and deleted; this version of underground does not run it"
   done
 }
@@ -411,7 +324,7 @@ ug_say ok backup "$code/bin/agent-home-tar, run as $agent_user, and sudo for $ow
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
-    omp | gh | code | config | state | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
+    omp | gh | code | config.git | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
     *)
       rm -rf "$item"
       ug_say changed "$item" "deleted; this version of underground does not install it"
