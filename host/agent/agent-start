@@ -28,9 +28,6 @@ start_omp() {
   exit 0
 }
 
-# The sync of an existing clone: fetch origin, then move HEAD onto the default branch,
-# all under a lock whose holder is another running fetch, which skips this one. It runs
-# detached with its output in .git/ug-fetch.log; tests extract this function.
 sync_repo() {
   local clone=$1 base
   cd "$clone" || return 0
@@ -58,8 +55,6 @@ sync_repo() {
   printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status
 }
 
-# What one launch tells the user about the last detached sync: a failure warning with
-# the last log line, and the kill of a fetch stuck for over 10 minutes.
 sync_report() {
   local clone=$1 status old_pid old_at last now
   status=$(head -n 1 "$clone/.git/ug-fetch.status" 2>/dev/null) || status=

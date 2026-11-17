@@ -211,11 +211,6 @@ ug_repo_slug() {
   echo "${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
 }
 
-# Sync every "<repo path> <target>" source of the list into the agent's home, all in
-# parallel, and print each synced target, so a caller can look inside what arrived;
-# every failed source is named in an error like ug_die's and 1 is returned, and the
-# caller decides whether that stops it. A line whose first word is plugin is refused:
-# plugins come from omp's own github marketplace, not from this list.
 ug_sync_sources() {
   local sources=$1 owner_home=$2 agent=$3 unpack=$4 tool=$5
   local -a paths=() targets=() pids=()

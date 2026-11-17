@@ -133,9 +133,6 @@ setup_backup() {
   fi
 }
 
-# Update one source repo, checking first so a repo with local work is never touched:
-# when the remote branch commit already is in HEAD's history, nothing is pulled, which
-# also covers commits not pushed yet. Any problem is a warning; setup keeps going.
 check_source() {
   local path=$1 up rname bref remote dirty
   up=$(git -C "$path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || up=
