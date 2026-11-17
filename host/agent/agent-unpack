@@ -33,11 +33,13 @@ trap 'rm -rf -- "$tmp"' EXIT
 /usr/bin/tar -x -C "$tmp"
 
 new=()
-shopt -s nullglob
+shopt -s nullglob dotglob
 for p in "$tmp"/*; do
-  new+=("${p##*/}")
+  name=${p##*/}
+  [[ $name != .git* && $name != .ug-* ]] || continue
+  new+=("$name")
 done
-shopt -u nullglob
+shopt -u nullglob dotglob
 (( ${#new[@]} )) || die "refused an empty archive for $target, so nothing changed"
 
 old=()
