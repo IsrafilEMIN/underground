@@ -34,22 +34,31 @@ for dir in "$HOME/.omp" "$agent"; do
   mkdir -p "$dir"
 done
 
-(
-  g=(git -c "safe.directory=$config_git" -C "$config_git")
-  new_rev=$("${g[@]}" rev-parse --verify --quiet refs/heads/main) ||
-    die "no config yet: push your config repo with git -C <your config repo> push $config_git HEAD:main"
-  old_rev=$(cat "$agent/.ug-config-rev" 2>/dev/null) || old_rev=
-  if [[ $new_rev != "$old_rev" ]]; then
-    while IFS= read -r -d '' name; do
-      if [[ -n $name ]]; then rm -rf -- "$agent/$name"; fi
-    done < <(
-      if [[ -n $old_rev ]]; then "${g[@]}" ls-tree --name-only -z "$old_rev" 2>/dev/null || true; fi
-      "${g[@]}" ls-tree --name-only -z "$new_rev"
-    )
-    "${g[@]}" archive --format=tar "$new_rev" | tar -x -C "$agent" || die "cannot unpack config $new_rev into $agent"
-    printf '%s\n' "$new_rev" >"$agent/.ug-config-rev"
-  fi
-) &
+read -r -d '' sync_config <<'EOF' || true
+set -eo pipefail
+config_git=$1 agent=$2
+g=(git -c "safe.directory=$config_git" -C "$config_git")
+new_rev=$("${g[@]}" rev-parse --verify --quiet refs/heads/main) || {
+  printf 'agent-start: no config yet: push your config repo with git -C <your config repo> push %s HEAD:main\n' "$config_git" >&2
+  exit 1
+}
+old_rev=$(cat "$agent/.ug-config-rev" 2>/dev/null) || old_rev=
+[[ $new_rev != "$old_rev" ]] || exit 0
+while IFS= read -r -d '' name; do
+  if [[ -n $name ]]; then rm -rf -- "$agent/$name"; fi
+done < <(
+  if [[ -n $old_rev ]]; then "${g[@]}" ls-tree --name-only -z "$old_rev" 2>/dev/null || true; fi
+  "${g[@]}" ls-tree --name-only -z "$new_rev"
+)
+"${g[@]}" archive --format=tar "$new_rev" | tar -x -C "$agent" || {
+  printf 'agent-start: cannot unpack config %s into %s\n' "$new_rev" "$agent" >&2
+  exit 1
+}
+printf '%s\n' "$new_rev" >"$agent/.ug-config-rev"
+EOF
+
+# The lock keeps two starts from unpacking a new config into the same folder at once.
+/usr/bin/lockf -k -t 30 "$agent/.ug-config.lock" /bin/bash -c "$sync_config" agent-config "$config_git" "$agent" &
 config_pid=$!
 
 synced_config() {
@@ -65,11 +74,13 @@ fi
 [[ $UG_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "UG_REPO has a value that is not owner/name"
 
 clone=$HOME/work/$UG_REPO
+new_clone=
 if [[ ! -d $clone/.git ]]; then
   rm -rf "$clone"
   mkdir -p "$clone"
   git -C "$clone" init -q
   git -C "$clone" remote add origin "https://github.com/$UG_REPO.git"
+  new_clone=1
 fi
 cd "$clone"
 
@@ -90,6 +101,11 @@ fi
   exit 69
 }
 
-git update-ref --no-deref HEAD "$base" || die "the clone of $UG_REPO cannot point its HEAD at $base; is that repository empty?"
+# A new clone gets one checkout so that it has files and an index; after that, only its HEAD moves.
+if [[ -n $new_clone ]]; then
+  git checkout -q --detach "$base" || die "the new clone of $UG_REPO cannot check out $base; is that repository empty?"
+else
+  git update-ref --no-deref HEAD "$base" || die "the clone of $UG_REPO cannot point its HEAD at $base; is that repository empty?"
+fi
 synced_config
 start_omp "$@"
