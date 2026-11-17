@@ -28,6 +28,49 @@ start_omp() {
   exit 0
 }
 
+sync_repo() {
+  local clone=$1 base
+  cd "$clone" || return 0
+  printf '%s %s\n' "$$" "$(date +%s)" >.git/ug-fetch.pid
+  /usr/bin/lockf -k -t 0 .git/ug-sync.lock git fetch --quiet --no-tags origin
+  case $? in
+    0) ;;
+    75)
+      printf 'skipped: another fetch holds the lock\n'
+      return 0
+      ;;
+    *)
+      printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status
+      return 0
+      ;;
+  esac
+  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+  if [[ -z $base ]]; then
+    git remote set-head origin --auto >/dev/null 2>&1 || true
+    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+  fi
+  if [[ -n $base ]]; then
+    git update-ref --no-deref HEAD "$base"
+  fi
+  printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status
+}
+
+sync_report() {
+  local clone=$1 status old_pid old_at last now
+  status=$(head -n 1 "$clone/.git/ug-fetch.status" 2>/dev/null) || status=
+  [[ ${status%% *} == failed ]] || return 0
+  last=$(tail -n 1 "$clone/.git/ug-fetch.log" 2>/dev/null) || last=
+  printf 'agent-start: the last background fetch of %s failed: %s\n' "$UG_REPO" "${last:-no log line}" >&2
+  now=$(date +%s)
+  if [[ -f $clone/.git/ug-fetch.pid ]]; then
+    read -r old_pid old_at <"$clone/.git/ug-fetch.pid" || true
+    if [[ ${old_pid:-} =~ ^[0-9]+$ && ${old_at:-} =~ ^[0-9]+$ ]] && (( now - old_at > 600 )) && kill -0 "$old_pid" 2>/dev/null; then
+      kill "$old_pid" 2>/dev/null || true
+      printf 'agent-start: killed a background fetch of %s stuck for over 10 minutes\n' "$UG_REPO" >&2
+    fi
+  fi
+}
+
 for dir in "$HOME/.omp" "$agent"; do
   if [[ -L $dir || ( -e $dir && ! -d $dir ) ]]; then rm -f "$dir"; fi
   mkdir -p "$dir"
@@ -41,37 +84,30 @@ fi
 [[ $UG_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "UG_REPO has a value that is not owner/name"
 
 clone=$HOME/work/$UG_REPO
-new_clone=
 if [[ ! -d $clone/.git ]]; then
+  # A first clone blocks: omp needs files and an index from the start.
   rm -rf "$clone"
   mkdir -p "$clone"
   git -C "$clone" init -q
   git -C "$clone" remote add origin "https://github.com/$UG_REPO.git"
-  new_clone=1
+  git -C "$clone" fetch --quiet --no-tags origin || {
+    printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
+    exit 69
+  }
+  base=$(git -C "$clone" symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+  if [[ -z $base ]]; then
+    git -C "$clone" remote set-head origin --auto >/dev/null 2>&1 || true
+    base=$(git -C "$clone" symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
+  fi
+  [[ -n $base ]] || {
+    printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
+    exit 69
+  }
+  git -C "$clone" checkout -q --detach "$base" || die "the new clone of $UG_REPO cannot check out $base; is that repository empty?"
+  cd "$clone"
+  start_omp "$@"
 fi
 cd "$clone"
-
-fetch_status=0
-/usr/bin/lockf -k -t 30 .git/ug-sync.lock git fetch --quiet --no-tags origin || fetch_status=$?
-(( fetch_status != 75 )) || die "another session holds the fetch of $UG_REPO for over 30 s; start the session again in a moment"
-(( fetch_status == 0 )) || {
-  printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
-  exit 69
-}
-base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-if [[ -z $base ]]; then
-  git remote set-head origin --auto >/dev/null 2>&1 || true
-  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-fi
-[[ -n $base ]] || {
-  printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
-  exit 69
-}
-
-# A new clone gets one checkout so that it has files and an index; after that, only its HEAD moves.
-if [[ -n $new_clone ]]; then
-  git checkout -q --detach "$base" || die "the new clone of $UG_REPO cannot check out $base; is that repository empty?"
-else
-  git update-ref --no-deref HEAD "$base" || die "the clone of $UG_REPO cannot point its HEAD at $base; is that repository empty?"
-fi
+sync_report "$clone"
+GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo); sync_repo \"\$@\"" _ "$clone" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
 start_omp "$@"

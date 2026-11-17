@@ -133,10 +133,65 @@ setup_backup() {
   fi
 }
 
-setup_sources() {
-  if [[ ! -f $data/sources ]]; then
-    later+=("write $data/sources with one line per config folder to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp does not update the agent's config")
+check_source() {
+  local path=$1 up rname bref remote dirty
+  up=$(git -C "$path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || up=
+  [[ -n $up ]] || { ug_say ok "source $path" "has no upstream branch; setup did not update it"; return 0; }
+  rname=${up%/*}
+  bref=${up#*/}
+  remote=$(GIT_TERMINAL_PROMPT=0 git -C "$path" ls-remote "$rname" "refs/heads/$bref" 2>/dev/null | cut -f1) || remote=
+  [[ -n $remote ]] || { ug_say ok "source $path" "cannot read $up from origin; check the network, setup did not update it"; return 0; }
+  if git -C "$path" cat-file -e "$remote^{commit}" 2>/dev/null && git -C "$path" merge-base --is-ancestor "$remote" HEAD; then
+    ug_say same "source $path" "already has $up"
+    return 0
   fi
+  dirty=$(git -C "$path" status --porcelain 2>/dev/null) || dirty=unknown
+  [[ -z $dirty ]] || { ug_say ok "source $path" "has uncommitted changes; setup did not update it"; return 0; }
+  if GIT_TERMINAL_PROMPT=0 git -C "$path" pull --quiet --ff-only 2>/dev/null; then
+    ug_say changed "source $path" "fast-forwarded to $up"
+  else
+    ug_say ok "source $path" "$up cannot fast-forward onto its origin; setup did not update it"
+  fi
+}
+
+expand_home() {
+  case $1 in
+    '~') printf '%s\n' "$HOME" ;;
+    '~/'*) printf '%s\n' "$HOME/${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+setup_sources() {
+  local line path target
+  if [[ ! -f $data/sources ]]; then
+    if [[ -t 0 ]]; then
+      read -r -p "path of the config repo to sync into the agent, empty for none: " path || path=''
+      path=$(expand_home "$path")
+      if [[ -n $path ]]; then
+        read -r -p "target inside the agent home [.omp/agent]: " target || target=''
+        [[ -n $target ]] || target=.omp/agent
+        printf '%s %s\n' "$path" "$target" >"$data/sources"
+        ug_say changed sources "wrote $data/sources with $path $target"
+      else
+        : >"$data/sources"
+        ug_say changed sources "wrote an empty $data/sources; add one line per config repo to sync"
+      fi
+    else
+      : >"$data/sources"
+      ug_say ok sources "wrote an empty $data/sources; add one line per config repo to sync"
+    fi
+  fi
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ -n $line && $line != '#'* ]] || continue
+    read -r path target <<<"$line"
+    [[ -n $path && $path != plugin && -n $target ]] || continue
+    path=$(expand_home "$path")
+    [[ -d $path/.git ]] || { ug_say ok "source $path" "is not a git repository; setup did not update it"; continue; }
+    check_source "$path"
+  done <"$data/sources"
+  [[ -s $data/sources ]] ||
+    later+=("write $data/sources with one line per config repo to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp does not update the agent's config")
 }
 
 put() {

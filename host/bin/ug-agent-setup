@@ -299,41 +299,6 @@ visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "the sudoers rules
 install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
 ug_say ok sudoers "$code/bin/agent-home-tar and $code/bin/agent-unpack, run as $agent_user, and sudo for $owner to run them (/etc/sudoers.d/underground)"
 
-sources=$data/sources
-if [[ -f $sources ]]; then
-  synced=$(ug_sync_sources "$sources" "$owner_home" "$agent_user" "$code/bin/agent-unpack" ug-agent-setup ug_as "$owner") || exit 1
-  omp_cli=(ug_as "$agent_user" /usr/bin/env HOME="$agent_home" "$code/bin/omp")
-  installed=$( ( cd / && "${omp_cli[@]}" plugin list --json ) | jq -r '.marketplace[]?.id' ) ||
-    ug_die ug-agent-setup "omp cannot list the plugins installed for $agent_user; check it with: sudo -u $agent_user HOME=$agent_home $code/bin/omp plugin list --json"
-  while IFS= read -r target; do
-    [[ -n $target ]] || continue
-    market=$agent_home/$target/.claude-plugin/marketplace.json
-    [[ -f $market ]] || continue
-    mp=$(jq -r '.name // empty' "$market") || ug_die ug-agent-setup "jq cannot read $market; is it valid JSON?"
-    [[ -n $mp ]] || ug_die ug-agent-setup "$market has no marketplace name"
-    plugins=$(jq -r '.plugins[]?.name // empty' "$market") || ug_die ug-agent-setup "jq cannot read the plugins of $market; is it valid JSON?"
-    if ! ( cd / && "${omp_cli[@]}" plugin marketplace list ) | sed -n 's/^  \([^[:space:]]*\)[[:space:]].*/\1/p' | grep -qxF "$mp"; then
-      err=$( cd / && "${omp_cli[@]}" plugin marketplace add "$agent_home/$target" 2>&1 ) ||
-        ug_die ug-agent-setup "omp could not add the marketplace $mp of $target to $agent_user's home: ${err//$'\n'/ }"
-      ug_say changed "marketplace $mp" "added from $target"
-    else
-      ug_say same "marketplace $mp" "already added"
-    fi
-    for plugin in $plugins; do
-      id=$plugin@$mp
-      if grep -qxF "$id" <<<"$installed"; then
-        ug_say same "plugin $id" "installed"
-      else
-        err=$( cd / && "${omp_cli[@]}" plugin install "$id" 2>&1 ) ||
-          ug_die ug-agent-setup "omp could not install the plugin $id into $agent_user's home: ${err//$'\n'/ }"
-        ug_say changed "plugin $id" "installed from $target"
-        installed+=$'\n'"$id"
-      fi
-    done
-  done <<<"$synced"
-fi
-
-
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
