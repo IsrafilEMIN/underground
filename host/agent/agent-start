@@ -21,10 +21,10 @@ export UG_GATEWAY_TOKEN=$(<"$root/gateway-token")
 
 omp_bin=$(readlink "$code/bin/omp") || die "no $code/bin/omp; the owner runs host/bin/ug-setup"
 
-# The agent's ssh login has no desktop session, so macOS logs a failed text-checking service lookup to stderr many times a session.
+# The agent's ssh login has no desktop session, so macOS logs failed text-checking and spell-server lookups to stderr.
 # grep ignores SIGINT so that a Ctrl-C cannot close omp's stderr.
 start_omp() {
-  { "$omp_bin" "$@" 2>&1 1>&3 3>&- | { trap '' INT; /usr/bin/grep --line-buffered -v -F 'dataFromCheckingString received error' >&2 || true; }; } 3>&1
+  { "$omp_bin" "$@" 2>&1 1>&3 3>&- | { trap '' INT; /usr/bin/grep --line-buffered -v -F -e 'dataFromCheckingString received error' -e 'Spell server connection invalidated' >&2 || true; }; } 3>&1
   exit 0
 }
 
