@@ -64,10 +64,14 @@ else
   else
     log "clearing stale locks in $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }; going on"
   fi
-  "$restic_bin" -r "$repo" backup --quiet --tag ug-agent --stdin-filename ug-agent-home.tar --stdin-from-command -- sudo -n -u "$agent_user" "$agent_tar"
-  status=$?
+  for attempt in 1 2; do
+    "$restic_bin" -r "$repo" backup --quiet --tag ug-agent --stdin-filename ug-agent-home.tar --stdin-from-command -- sudo -n -u "$agent_user" "$agent_tar"
+    status=$?
+    [[ $status -ne 0 ]] || break
+    log "attempt $attempt: the agent home was not saved (restic exit $status$(restic_hint "$status")); a failed read stores no snapshot"
+  done
   if [[ $status -ne 0 ]]; then
-    log "the agent home was not saved (restic exit $status$(restic_hint "$status")); a failed read stores no snapshot"
+    log "the agent home was not saved in 2 attempts"
   else
     log "saved the agent home to $repo"
     subset=$(( 10#$(date +%j) % 100 + 1 ))
