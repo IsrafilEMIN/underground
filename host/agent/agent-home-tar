@@ -13,9 +13,6 @@ die() {
   exit 1
 }
 
-# sqlite copies the databases first so the archive holds consistent snapshots;
-# the folder sits in the home so the copies stay on the same volume, and the
-# tar never sees it because the include list below names no such member.
 tmp=$(mktemp -d "$home/.ug-backup-tar.XXXXXX") || die "could not make a temporary folder in $home"
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -29,9 +26,6 @@ if [[ -f $home/.omp/stats.db ]]; then
   db_files+=("$home/.omp/stats.db")
 fi
 
-# A copy is added as ./cN.db and renamed to the database's own path with -s;
-# the live database and its -wal/-shm files are excluded, and the flat name
-# keeps the exclusion for one database from matching another copy.
 args=(--no-xattrs
   --exclude ./.omp/agent/cache
   --exclude 'models.db*'
@@ -55,9 +49,5 @@ if [[ -d $home/scratch ]]; then
   members+=(./scratch)
 fi
 
-status=0
-/usr/bin/tar -C "$home" -c "${args[@]}" ${members[@]+"${members[@]}"} ${copies[@]+"${copies[@]}"} || status=$?
-if (( status > 1 )); then
-  printf 'agent-home-tar: tar failed with status %s\n' "$status" >&2
-  exit "$status"
-fi
+/usr/bin/tar -C "$home" -c "${args[@]}" ${members[@]+"${members[@]}"} ${copies[@]+"${copies[@]}"} ||
+  die "tar failed with status $?, so this run stores no snapshot"
