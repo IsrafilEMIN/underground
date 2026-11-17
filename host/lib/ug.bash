@@ -147,10 +147,14 @@ ug_service_expand() {
   printf '%s\n' "$text"
 }
 
-ug_die() {
+ug_err() {
   local tool=$1
   shift
   printf '%s%s: %s%s\n' "$(ug_paint 2 red)" "$tool" "$*" "$(ug_paint 2 off)" >&2
+}
+
+ug_die() {
+  ug_err "$@"
   exit 1
 }
 
@@ -205,6 +209,54 @@ ug_repo_slug() {
   url=${url%.git}
   [[ $url =~ $re ]] || return 1
   echo "${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
+}
+
+# Sync every "<repo path> <target>" source of the list into the agent's home and print
+# each synced target, so a caller can look inside what arrived; errors are printed like
+# ug_die's and return 1, and the caller decides whether that stops it. The trailing
+# words run before git, so a caller that runs as root can pass ug_as <owner> and have
+# git read the repos, which are the owner's, as the owner.
+ug_sync_sources() {
+  local sources=$1 owner_home=$2 agent=$3 unpack=$4 tool=$5
+  shift 5
+  local -a runner=("${@+"$@"}") paths=() targets=()
+  local target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
+  local line path target extra prev n
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ -n $line && $line != '#'* ]] || continue
+    read -r path target extra <<<"$line"
+    [[ -n $path ]] || continue
+    [[ -n $target && -z $extra ]] ||
+      { ug_err "$tool" "in $sources: \"$line\": a source is a repo path and a target, and nothing else"; return 1; }
+    case $path in
+      '~') path=$owner_home ;;
+      '~/'*) path=$owner_home/${path#\~/} ;;
+    esac
+    [[ $path == /* ]] ||
+      { ug_err "$tool" "in $sources: $path is not an absolute path or a ~ path"; return 1; }
+    [[ $target =~ $target_re ]] ||
+      { ug_err "$tool" "in $sources: target $target is not a plain relative path"; return 1; }
+    case /$target/ in
+      */./*|*/../*) ug_err "$tool" "in $sources: target $target has a . or .. component"; return 1 ;;
+    esac
+    for (( n=0; n<${#targets[@]}; n++ )); do
+      prev=${targets[n]}
+      [[ $target != "$prev" ]] ||
+        { ug_err "$tool" "in $sources: two sources share the target $target"; return 1; }
+      case $target in
+        "$prev"/*) ug_err "$tool" "in $sources: target $target lies inside $prev"; return 1 ;;
+      esac
+      case $prev in
+        "$target"/*) ug_err "$tool" "in $sources: target $prev lies inside $target"; return 1 ;;
+      esac
+    done
+    paths+=("$path") targets+=("$target")
+  done <"$sources"
+  for (( n=0; n<${#paths[@]}; n++ )); do
+    ( cd / && ${runner[@]+"${runner[@]}"} git -C "${paths[n]}" archive --format=tar HEAD | sudo -n -u "$agent" "$unpack" "${targets[n]}" ) ||
+      { ug_err "$tool" "cannot sync ${paths[n]} to $agent:${targets[n]}; is it a git repository with a HEAD commit, and did host/bin/ug-setup grant the unpack helper?"; return 1; }
+    printf '%s\n' "${targets[n]}"
+  done
 }
 
 # shellcheck disable=SC2016
