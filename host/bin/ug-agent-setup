@@ -174,18 +174,6 @@ if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; th
   ug_say ok "github app" "no app key in $gh_app_dir yet; put the private key of the GitHub App in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
 fi
 
-config_git=$root/config.git
-if [[ ! -e $config_git ]]; then
-  git init --bare -b main "$config_git" >/dev/null || ug_die ug-agent-setup "cannot create the bare config repo $config_git"
-  ug_say changed "config.git" "created bare in $config_git"
-fi
-chown -R "$owner:staff" "$config_git" || ug_die ug-agent-setup "cannot make $config_git belong to $owner:staff"
-chmod 755 "$config_git" || ug_die ug-agent-setup "cannot make $config_git mode 755"
-ug_say ok "config.git" "every user can read it, only $owner can push"
-if ! git -c "safe.directory=$config_git" -C "$config_git" rev-parse --verify --quiet main >/dev/null; then
-  ug_say ok "config.git" "has no main yet; push your config repo with: git -C <your config repo> push $config_git HEAD:main"
-fi
-
 if [[ ! -f $root/ssh_host_ed25519_key ]]; then
   ssh-keygen -q -t ed25519 -N '' -f "$root/ssh_host_ed25519_key"
 fi
@@ -215,7 +203,7 @@ ug_say ok "owner key for the agent login" "$owner_key"
 engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 [[ $engine =~ $ip_port ]] || ug_die ug-agent-setup "$data/addresses needs an engine=<ip>:<port> line"
 
-for name in agent-session agent-start sshd_config agent-home-tar agent-pf.conf agent-pf-load; do
+for name in agent-session agent-start sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
   render "host/agent/$name"
 done
 render "host/agent/gh-app-token"
@@ -225,7 +213,7 @@ rm -rf "$code.new" "$code.old"
 install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/usage-broker" "$code.new/authorized_keys"
 ln -s "$omp_bin" "$code.new/bin/omp"
 install -m 555 -o root -g wheel "$rendered_dir/gh-app-token" "$rendered_dir/gh" "$code.new/bin/"
-install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$code.new/bin/agent-home-tar"
+install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$rendered_dir/agent-unpack" "$code.new/bin/"
 install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-broker/"
 install -m 444 -o root -g wheel "$src/host/facts" "$rendered_dir/sshd_config" "$code.new/"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
@@ -237,7 +225,7 @@ chmod 444 "$code.new/authorized_keys/$agent_user"
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
-ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, authorized_keys, bin/, usage-broker/"
+ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, authorized_keys, bin/ (omp, gh, gh-app-token, agent-home-tar, agent-unpack), usage-broker/"
 
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
@@ -313,18 +301,23 @@ ln -sfn "$agent_dir/bin/ug-agent" "$bin_dir/omp"
 chown -h "$owner" "$bin_dir/omp"
 ug_say ok "omp on PATH" "$bin_dir/omp, the agent's launcher"
 
-sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the backup sudoers rule"
+sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
 cleanup+=("$sudoers_tmp")
-printf '%s ALL=(%s) NOPASSWD: %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" >"$sudoers_tmp"
-visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "the sudoers rule for the backup does not check; nothing was installed"
-install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground-backup
-ug_say ok backup "$code/bin/agent-home-tar, run as $agent_user, and sudo for $owner to run it (/etc/sudoers.d/underground-backup)"
+printf '%s ALL=(%s) NOPASSWD: %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" >"$sudoers_tmp"
+visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "the sudoers rules for the agent helpers do not check; nothing was installed"
+for stale in /etc/sudoers.d/underground-*; do
+  [[ -e $stale || -L $stale ]] || continue
+  rm -f "$stale"
+  ug_say changed "sudoers $stale" "deleted; one file /etc/sudoers.d/underground holds every rule now"
+done
+install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
+ug_say ok sudoers "$code/bin/agent-home-tar and $code/bin/agent-unpack, run as $agent_user, and sudo for $owner to run them (/etc/sudoers.d/underground)"
 
 
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
-    omp | gh | code | config.git | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
+    omp | gh | code | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
     *)
       rm -rf "$item"
       ug_say changed "$item" "deleted; this version of underground does not install it"

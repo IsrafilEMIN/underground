@@ -1,0 +1,64 @@
+#!/bin/bash
+set -euo pipefail
+
+home=@AGENT_HOME@
+target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
+
+die() {
+  printf 'agent-unpack: %s\n' "$*" >&2
+  exit 1
+}
+
+if [[ $# -ne 1 ]]; then
+  printf 'usage: agent-unpack <target>\n' >&2
+  exit 64
+fi
+target=$1
+
+[[ $target =~ $target_re ]] ||
+  die "refused target $target: expected a relative path of letters, digits, dots, dashes and underscores"
+case /$target/ in
+  */./*|*/../*) die "refused target $target: it has a . or .. component" ;;
+esac
+dest=$home/$target
+
+if [[ -z ${UG_UNPACK_LOCKED:-} ]]; then
+  export UG_UNPACK_LOCKED=1
+  exec /usr/bin/lockf -k -t 30 "$home/.ug-unpack.lock" "$0" "$target"
+fi
+
+mkdir -p "$dest"
+tmp=$(mktemp -d "$dest/.ug-unpack.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+/usr/bin/tar -x -C "$tmp"
+
+new=()
+shopt -s nullglob
+for p in "$tmp"/*; do
+  new+=("${p##*/}")
+done
+shopt -u nullglob
+(( ${#new[@]} )) || die "refused an empty archive for $target, so nothing changed"
+
+old=()
+if [[ -f $dest/.ug-names ]]; then
+  while IFS= read -r name || [[ -n $name ]]; do
+    if [[ -n $name ]]; then old+=("$name"); fi
+  done <"$dest/.ug-names"
+fi
+
+if (( ${#old[@]} )); then
+  for name in "${old[@]}"; do
+    keep=0
+    for fresh in "${new[@]}"; do
+      if [[ $fresh == "$name" ]]; then keep=1; break; fi
+    done
+    if (( ! keep )); then rm -rf -- "$dest/$name"; fi
+  done
+fi
+
+for name in "${new[@]}"; do
+  rm -rf -- "$dest/$name"
+  mv -- "$tmp/$name" "$dest/$name"
+done
+printf '%s\n' "${new[@]}" >"$dest/.ug-names"

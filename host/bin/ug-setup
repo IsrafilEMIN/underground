@@ -133,6 +133,12 @@ setup_backup() {
   fi
 }
 
+setup_sources() {
+  if [[ ! -f $data/sources ]]; then
+    later+=("write $data/sources with one line per config folder to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp runs the agent with no config of yours")
+  fi
+}
+
 put() {
   local from=$1 to=$2 mode=$3 tmp
   tmp=$(mktemp "$(dirname "$to")/.put.XXXXXX")
@@ -244,6 +250,7 @@ stage_gh
 retire_agents
 install_service_code
 setup_backup
+setup_sources
 prepare_services
 ug_say ok "agent user" "running sudo host/bin/ug-agent-setup, which asks for your password"
 no_color=()
