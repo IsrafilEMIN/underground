@@ -72,8 +72,7 @@ if [[ -f $sources ]]; then
     paths+=("$path") targets+=("$target")
   done <"$sources"
   for (( n=0; n<${#paths[@]}; n++ )); do
-    git -C "${paths[n]}" archive --format=tar HEAD |
-      sudo -n -u "$agent" "$unpack" "${targets[n]}" ||
+    ( cd / && git -C "${paths[n]}" archive --format=tar HEAD | sudo -n -u "$agent" "$unpack" "${targets[n]}" ) ||
       ug_die ug-agent "cannot sync ${paths[n]} to $agent:${targets[n]}; is it a git repository with a HEAD commit, and did host/bin/ug-setup grant the unpack helper?"
   done
 else
