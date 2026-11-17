@@ -219,6 +219,21 @@ mv "$code.new" "$code"
 rm -rf "$code.old"
 ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, ug-notices.ts, authorized_keys, bin/ (omp, gh, gh-app-token, agent-home-tar, agent-unpack), usage-broker/"
 
+# Only the app can say which repos it may write to, so the listing is taken as $agent_user, while
+# host/bin/ug-setup reads the rules with the login of $owner, which alone can read a bypass list.
+app_repos=$data/app-repos
+app_tmp=$(mktemp "$data/.app-repos.XXXXXX") || ug_die ug-agent-setup "cannot make a temp file for $app_repos"
+cleanup+=("$app_tmp")
+if app_list=$( (cd / && ug_as "$agent_user" "$code/bin/gh" api installation/repositories --paginate --jq '.repositories[] | "\(.full_name) \(.private)"') 2>/dev/null); then
+  [[ -z $app_list ]] || printf '%s\n' "$app_list" >"$app_tmp"
+  chown "$owner:staff" "$app_tmp"
+  chmod 600 "$app_tmp"
+  mv -f "$app_tmp" "$app_repos"
+  ug_say ok "app repos" "the repos the app may write to are listed in $app_repos, which setup checks the rule on main of"
+else
+  ug_say ok "app repos" "$app_repos keeps what setup listed last time; the app cannot list its repos now, so $gh_app_dir holds no key or GitHub does not answer"
+fi
+
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
 install -m 600 -o "$owner" -g staff "$known_hosts.tmp" "$known_hosts"

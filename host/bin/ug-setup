@@ -330,6 +330,26 @@ check_path() {
   fi
 }
 
+check_app_repos() {
+  local slug repo private login out
+  [[ -f $data/app-repos ]] || return 0
+  login=$(gh api user | jq -r '.login // empty') || login=""
+  [[ -n $login ]] || { ug_say ok "app repos" "gh has no GitHub login, so setup cannot check the rule on main of the repos of the app; run: gh auth login, then run setup again"; return 0; }
+  slug=$(ug_repo_slug "$src") || slug=""
+  while read -r repo private || [[ -n $repo ]]; do
+    [[ -n $repo && $repo != "$slug" ]] || continue
+    if [[ $private == true ]]; then
+      later+=("GitHub does not enforce the rule on main of $repo, because it is private and a free plan enforces rulesets on public repos only, so the agent could change its main: make $repo public, upgrade the plan, or remove $repo from the app")
+      continue
+    fi
+    if out=$(ug_check_repo_rule "$repo" "$login" 2>&1); then
+      ug_say same "main rule of $repo" "GitHub merges to main only with the approval of @$login"
+    else
+      later+=("${out//$'\n'/ }")
+    fi
+  done <"$data/app-repos"
+}
+
 finish() {
   if [[ ${#later[@]} -eq 0 ]]; then
     printf '%sug-setup: done; nothing is left to do%s\n' "$green" "$plain"
@@ -353,6 +373,7 @@ ug_say ok "agent user" "running sudo host/bin/ug-agent-setup, which asks for you
 no_color=()
 [[ -z ${NO_COLOR:-} ]] || no_color=(env NO_COLOR=1)
 sudo ${no_color[@]+"${no_color[@]}"} "$src/host/bin/ug-agent-setup" ${omp_stage:+"$omp_stage"} || ug_die ug-setup "ug-agent-setup failed, so the agent user is not up to date; fix its error and run host/bin/ug-setup again"
+check_app_repos
 start_services
 check_path
 finish
