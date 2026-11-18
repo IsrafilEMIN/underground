@@ -48,13 +48,8 @@ sync_repo() {
       ;;
   esac
   base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  if [[ -z $base ]]; then
-    git remote set-head origin --auto >/dev/null 2>&1 || true
-    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  fi
-  if [[ -n $base ]]; then
-    git update-ref --no-deref HEAD "$base"
-  fi
+  [[ -n $base ]] || { printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status; return 0; }
+  git update-ref --no-deref HEAD "$base"
   printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status
 }
 
@@ -93,15 +88,12 @@ if [[ ! -d $clone/.git ]]; then
   mkdir -p "$clone"
   git -C "$clone" init -q
   git -C "$clone" remote add origin "https://github.com/$UG_REPO.git"
+  git -C "$clone" config remote.origin.followRemoteHEAD always
   git -C "$clone" fetch --quiet --no-tags origin || {
     printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
     exit 69
   }
   base=$(git -C "$clone" symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  if [[ -z $base ]]; then
-    git -C "$clone" remote set-head origin --auto >/dev/null 2>&1 || true
-    base=$(git -C "$clone" symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  fi
   [[ -n $base ]] || {
     printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
     exit 69
@@ -111,6 +103,7 @@ if [[ ! -d $clone/.git ]]; then
   start_omp "$@"
 fi
 cd "$clone"
+git -C "$clone" config remote.origin.followRemoteHEAD always
 sync_report "$clone"
 GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo); sync_repo \"\$@\"" _ "$clone" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
 start_omp "$@"
