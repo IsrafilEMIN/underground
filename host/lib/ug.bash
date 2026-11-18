@@ -260,7 +260,6 @@ ug_expand_home() {
   esac
 }
 
-# Prints one path<TAB>target line per source; the first bad line is an error.
 ug_read_sources() {
   local file=$1 home=$2 tool=$3
   local target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
