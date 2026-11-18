@@ -1,0 +1,10 @@
+diff --git a/host/agent/agent-home-tar b/host/agent/agent-home-tar
+index 6dd95d2..eda2d28 100755
+--- a/host/agent/agent-home-tar
++++ b/host/agent/agent-home-tar
+@@ -50,4 +50,4 @@ if [[ -d $home/scratch ]]; then
+ fi
+ 
+ /usr/bin/tar -C "$home" -c "${args[@]}" ${members[@]+"${members[@]}"} ${copies[@]+"${copies[@]}"} ||
+-  die "tar failed with status $?, so this run stores no snapshot"
++  [[ $? -eq 1 ]] || die "tar failed with status $?, so this run stores no snapshot"

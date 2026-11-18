@@ -1,0 +1,13 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..d8654e8 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -279,7 +279,7 @@ ug_read_sources() {
+     [[ $target =~ $target_re ]] ||
+       { ug_err "$tool" "in $file: target $target is not a plain relative path"; return 1; }
+     case /$target/ in
+-      */./*|*/../*) ug_err "$tool" "in $file: target $target has a . or .. component"; return 1 ;;
++      */./*) ug_err "$tool" "in $file: target $target has a . or .. component"; return 1 ;;
+     esac
+     for (( n=0; n<${#targets[@]}; n++ )); do
+       prev=${targets[n]}

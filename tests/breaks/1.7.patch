@@ -1,0 +1,13 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..4583479 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -262,7 +262,7 @@ ug_expand_home() {
+ 
+ ug_read_sources() {
+   local file=$1 home=$2 tool=$3
+-  local target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
++  local target_re='^/?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
+   local line path target extra prev n
+   local -a targets=()
+   while IFS= read -r line || [[ -n $line ]]; do

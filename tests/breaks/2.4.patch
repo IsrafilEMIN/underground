@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..bdaa845 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -36,7 +36,7 @@ new=()
+ shopt -s nullglob dotglob
+ for p in "$tmp"/*; do
+   name=${p##*/}
+-  [[ $name != .git* && $name != .ug-* ]] || continue
++  [[ $name != .* ]] || continue
+   new+=("$name")
+ done
+ shopt -u nullglob dotglob

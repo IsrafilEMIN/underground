@@ -1,0 +1,16 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..8c10633 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -59,6 +59,11 @@ if (( ${#old[@]} )); then
+   done
+ fi
+ 
++shopt -s nullglob dotglob
++for p in "$dest"/*; do
++  if [[ $p != "$tmp" ]]; then rm -rf -- "$p"; fi
++done
++shopt -u nullglob dotglob
+ for name in "${new[@]}"; do
+   rm -rf -- "$dest/$name"
+   mv -- "$tmp/$name" "$dest/$name"

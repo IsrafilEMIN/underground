@@ -1,0 +1,13 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..407155d 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -274,8 +274,6 @@ ug_read_sources() {
+     [[ -n $target && -z $extra ]] ||
+       { ug_err "$tool" "in $file: \"$line\": a source is a repo path and a target, and nothing else"; return 1; }
+     path=$(ug_expand_home "$path" "$home")
+-    [[ $path == /* ]] ||
+-      { ug_err "$tool" "in $file: $path is not an absolute path or a ~ path"; return 1; }
+     [[ $target =~ $target_re ]] ||
+       { ug_err "$tool" "in $file: target $target is not a plain relative path"; return 1; }
+     case /$target/ in

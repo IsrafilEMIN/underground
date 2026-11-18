@@ -1,0 +1,14 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..e374c7f 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -288,9 +288,6 @@ ug_read_sources() {
+       case $target in
+         "$prev"/*) ug_err "$tool" "in $file: target $target lies inside $prev"; return 1 ;;
+       esac
+-      case $prev in
+-        "$target"/*) ug_err "$tool" "in $file: target $prev lies inside $target"; return 1 ;;
+-      esac
+     done
+     targets+=("$target")
+     printf '%s\t%s\n' "$path" "$target"

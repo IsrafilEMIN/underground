@@ -1,0 +1,15 @@
+diff --git a/host/agent/agent-home-tar b/host/agent/agent-home-tar
+index 6dd95d2..11398f1 100755
+--- a/host/agent/agent-home-tar
++++ b/host/agent/agent-home-tar
+@@ -35,9 +35,8 @@ n=0
+ for db in ${db_files[@]+"${db_files[@]}"}; do
+   rel=${db#"$home/"}
+   /usr/bin/sqlite3 "$db" ".timeout 5000" ".backup '$tmp/c$n.db'" || die "could not copy the database $rel"
+-  args+=(--exclude "./$rel" --exclude "./$rel-wal" --exclude "./$rel-shm")
++  args+=(--exclude "./$rel-wal" --exclude "./$rel-shm")
+   args+=(-s "|^\\./c$n\\.db\$|./$rel|")
+-  copies+=(-C "$tmp" "./c$n.db")
+   n=$((n + 1))
+ done
+ 

@@ -1,0 +1,55 @@
+#!/bin/bash
+TESTS_DIR=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+# shellcheck source=tests/lib.bash
+source "$TESTS_DIR/lib.bash" || { printf 'run: cannot read %s/lib.bash\n' "$TESTS_DIR" >&2; exit 2; }
+
+ug_load_tests || { printf 'run: a test file cannot be read\n' >&2; exit 2; }
+
+ids=()
+if (($# == 0)); then
+  all=$(ug_test_ids)
+  while IFS= read -r id; do
+    [[ -n $id ]] && ids+=("$id")
+  done <<<"$all"
+else
+  for id in "$@"; do
+    [[ $(type -t "t_${id//./_}") == function ]] ||
+      { printf 'run: no test %s\n' "$id" >&2; exit 2; }
+    ids+=("$id")
+  done
+fi
+
+failed=0
+errored=0
+for id in "${ids[@]}"; do
+  out=$(
+    UG_TEST_ID=$id
+    UG_TMPDIRS=()
+    trap 'for d in ${UG_TMPDIRS[@]+"${UG_TMPDIRS[@]}"}; do rm -rf "$d"; done' EXIT
+    "t_${id//./_}"
+  )
+  rc=$?
+  case $rc in
+    0) printf 'ok %s\n' "$id" ;;
+    1)
+      if [[ $out != *ASSERT-FAILED* ]]; then
+        # exit 1 without a marker means the test died instead of asserting.
+        printf 'run: %s exited 1 without an assertion\n%s\n' "$id" "$out" >&2
+        errored=1
+      else
+        while IFS= read -r line; do
+          [[ $line == ASSERT-FAILED* ]] && printf '%s\n' "$line"
+        done <<<"$out"
+        failed=1
+      fi
+      ;;
+    *)
+      printf 'run: %s exited %s\n%s\n' "$id" "$rc" "$out" >&2
+      errored=1
+      ;;
+  esac
+done
+
+((errored)) && exit 2
+((failed)) && exit 1
+exit 0

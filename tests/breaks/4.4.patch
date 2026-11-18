@@ -1,0 +1,13 @@
+diff --git a/host/bin/ug-backup b/host/bin/ug-backup
+index 4aa1563..bbb0289 100755
+--- a/host/bin/ug-backup
++++ b/host/bin/ug-backup
+@@ -48,7 +48,7 @@ err=$("$restic_bin" -r "$repo" cat config 2>&1 >/dev/null) || status=$?
+ if [[ $status -eq 10 ]]; then
+   status=0
+   what="cannot be made"
+-  err=$("$restic_bin" -r "$repo" init 2>&1 >/dev/null) || status=$?
++  err=
+   [[ $status -ne 0 ]] || log "made the repo $repo"
+ fi
+ if [[ $status -ne 0 ]]; then
