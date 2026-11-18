@@ -32,6 +32,13 @@ ug_say() {
 
 ug_pin() { sed -n "s/^$2=//p" "$1"; }
 
+ug_pin_checked() {
+  local file=$1 key=$2 re=$3 tool=$4 value
+  value=$(ug_pin "$file" "$key") || true
+  [[ $value =~ $re ]] || ug_die "$tool" "bad pin for $key in $file"
+  printf '%s\n' "$value"
+}
+
 ug_facts_file=${BASH_SOURCE[0]%/*}/../facts
 
 ug_fact() {
@@ -171,6 +178,40 @@ ug_sha256() {
   printf '%s\n' "${out%% *}"
 }
 
+ug_fetch_pinned() {
+  local url=$1 want=$2 dest=$3 tool=$4
+  local name=${dest##*/} dir=${dest%/*} tmp have
+  if [[ -f $dest && ! -L $dest ]] && [[ $(ug_sha256 "$dest") == "$want" ]]; then
+    ug_say same "$name" "in place in $dest"
+    return 0
+  fi
+  [[ -d $dir ]] || install -d "$dir" ||
+    { ug_err "$tool" "cannot create $dir to hold $dest"; return 1; }
+  tmp=$(mktemp "$dir/.$name.XXXXXX") ||
+    { ug_err "$tool" "cannot make a temp file in $dir to receive $url"; return 1; }
+  if ! curl -fsSL --proto '=https' --retry 3 -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    ug_err "$tool" "download of $url failed"
+    return 1
+  fi
+  if ! have=$(ug_sha256 "$tmp"); then
+    rm -f "$tmp"
+    ug_err "$tool" "cannot checksum the download of $url"
+    return 1
+  fi
+  if [[ $have != "$want" ]]; then
+    rm -f "$tmp"
+    ug_err "$tool" "$url has SHA-256 $have, want $want; nothing changed"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$dest"; then
+    rm -f "$tmp"
+    ug_err "$tool" "cannot move the checked download into $dest; nothing changed"
+    return 1
+  fi
+  ug_say changed "$name" "downloaded, checked and installed in $dest"
+}
+
 ug_check_checkout() {
   local src=$1 tool=$2 head main dirty
   dirty=$(git --no-optional-locks -c "safe.directory=$src" -C "$src" status --porcelain 2>/dev/null) || { printf '%s: %s is not a git checkout\n' "$tool" "$src" >&2; return 1; }
@@ -211,43 +252,60 @@ ug_repo_slug() {
   echo "${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
 }
 
-ug_sync_sources() {
-  local sources=$1 owner_home=$2 agent=$3 unpack=$4 tool=$5
-  local -a paths=() targets=() pids=()
+ug_expand_home() {
+  case $1 in
+    '~') printf '%s\n' "$2" ;;
+    '~/'*) printf '%s\n' "$2/${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+ug_read_sources() {
+  local file=$1 home=$2 tool=$3
   local target_re='^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$'
-  local line path target extra prev n failed=0
+  local line path target extra prev n
+  local -a targets=()
   while IFS= read -r line || [[ -n $line ]]; do
     [[ -n $line && $line != '#'* ]] || continue
     read -r path target extra <<<"$line"
     [[ -n $path ]] || continue
     [[ $path != plugin ]] ||
-      { ug_err "$tool" "in $sources: \"$line\": plugins are not sources; they come from omp's own github marketplace"; return 1; }
+      { ug_err "$tool" "in $file: \"$line\": plugins are not sources; they come from omp's own github marketplace"; return 1; }
     [[ -n $target && -z $extra ]] ||
-      { ug_err "$tool" "in $sources: \"$line\": a source is a repo path and a target, and nothing else"; return 1; }
-    case $path in
-      '~') path=$owner_home ;;
-      '~/'*) path=$owner_home/${path#\~/} ;;
-    esac
+      { ug_err "$tool" "in $file: \"$line\": a source is a repo path and a target, and nothing else"; return 1; }
+    path=$(ug_expand_home "$path" "$home")
     [[ $path == /* ]] ||
-      { ug_err "$tool" "in $sources: $path is not an absolute path or a ~ path"; return 1; }
+      { ug_err "$tool" "in $file: $path is not an absolute path or a ~ path"; return 1; }
     [[ $target =~ $target_re ]] ||
-      { ug_err "$tool" "in $sources: target $target is not a plain relative path"; return 1; }
+      { ug_err "$tool" "in $file: target $target is not a plain relative path"; return 1; }
     case /$target/ in
-      */./*|*/../*) ug_err "$tool" "in $sources: target $target has a . or .. component"; return 1 ;;
+      */./*|*/../*) ug_err "$tool" "in $file: target $target has a . or .. component"; return 1 ;;
     esac
     for (( n=0; n<${#targets[@]}; n++ )); do
       prev=${targets[n]}
       [[ $target != "$prev" ]] ||
-        { ug_err "$tool" "in $sources: two sources share the target $target"; return 1; }
+        { ug_err "$tool" "in $file: two sources share the target $target"; return 1; }
       case $target in
-        "$prev"/*) ug_err "$tool" "in $sources: target $target lies inside $prev"; return 1 ;;
+        "$prev"/*) ug_err "$tool" "in $file: target $target lies inside $prev"; return 1 ;;
       esac
       case $prev in
-        "$target"/*) ug_err "$tool" "in $sources: target $prev lies inside $target"; return 1 ;;
+        "$target"/*) ug_err "$tool" "in $file: target $prev lies inside $target"; return 1 ;;
       esac
     done
+    targets+=("$target")
+    printf '%s\t%s\n' "$path" "$target"
+  done <"$file"
+}
+
+ug_sync_sources() {
+  local sources=$1 owner_home=$2 agent=$3 unpack=$4 tool=$5
+  local -a paths=() targets=() pids=()
+  local pairs path target n failed=0
+  pairs=$(ug_read_sources "$sources" "$owner_home" "$tool") || return 1
+  while IFS=$'\t' read -r path target; do
+    [[ -n $path ]] || continue
     paths+=("$path") targets+=("$target")
-  done <"$sources"
+  done <<<"$pairs"
   for (( n=0; n<${#paths[@]}; n++ )); do
     ( cd / && git -C "${paths[n]}" archive --format=tar HEAD | sudo -n -u "$agent" "$unpack" "${targets[n]}" ) &
     pids+=($!)
