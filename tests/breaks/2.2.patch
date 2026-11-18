@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..7a62889 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -55,7 +55,7 @@ if (( ${#old[@]} )); then
+     for fresh in "${new[@]}"; do
+       if [[ $fresh == "$name" ]]; then keep=1; break; fi
+     done
+-    if (( ! keep )); then rm -rf -- "$dest/$name"; fi
++    :
+   done
+ fi
+ 

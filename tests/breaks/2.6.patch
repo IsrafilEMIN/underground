@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..a46d4a6 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -30,7 +30,7 @@ fi
+ mkdir -p "$dest"
+ tmp=$(mktemp -d "$dest/.ug-unpack.XXXXXX")
+ trap 'rm -rf -- "$tmp"' EXIT
+-/usr/bin/tar -x -C "$tmp"
++/usr/bin/tar -x -C "$tmp" || true
+ 
+ new=()
+ shopt -s nullglob dotglob

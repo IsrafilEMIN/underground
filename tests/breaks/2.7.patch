@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..1b37f1a 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -18,7 +18,7 @@ target=$1
+ [[ $target =~ $target_re ]] ||
+   die "refused target $target: expected a relative path of letters, digits, dots, dashes and underscores"
+ case /$target/ in
+-  */./*|*/../*) die "refused target $target: it has a . or .. component" ;;
++  */./*) die "refused target $target: it has a . or .. component" ;;
+ esac
+ dest=$home/$target
+ 

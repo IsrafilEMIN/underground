@@ -1,0 +1,13 @@
+diff --git a/host/bin/ug-agent b/host/bin/ug-agent
+index 0b6ef33..ec4f4bc 100755
+--- a/host/bin/ug-agent
++++ b/host/bin/ug-agent
+@@ -51,7 +51,7 @@ notices=
+ add_notice() { notices=${notices:+$notices$'\n'}$1; }
+ last=$(head -n 1 "$UG/backup/last" 2>/dev/null) || last=
+ if [[ ! $last =~ ^[0-9]+$ ]]; then
+-  add_notice "no good backup yet; read $UG/backup/backup.log"
++  :
+ else
+   now=$(date +%s)
+   if (( now - last > 172800 )); then

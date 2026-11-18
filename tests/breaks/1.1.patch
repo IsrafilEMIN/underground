@@ -1,0 +1,13 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..9a544da 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -255,7 +255,7 @@ ug_repo_slug() {
+ ug_expand_home() {
+   case $1 in
+     '~') printf '%s\n' "$2" ;;
+-    '~/'*) printf '%s\n' "$2/${1#\~/}" ;;
++    '~/'*) printf '%s\n' "$1" ;;
+     *) printf '%s\n' "$1" ;;
+   esac
+ }

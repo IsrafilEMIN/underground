@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..68db255 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -40,7 +40,6 @@ for p in "$tmp"/*; do
+   new+=("$name")
+ done
+ shopt -u nullglob dotglob
+-(( ${#new[@]} )) || die "refused an empty archive for $target, so nothing changed"
+ 
+ old=()
+ if [[ -f $dest/.ug-names ]]; then

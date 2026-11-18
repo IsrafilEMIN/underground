@@ -1,0 +1,13 @@
+diff --git a/host/bin/ug-backup b/host/bin/ug-backup
+index 4aa1563..8ad06ed 100755
+--- a/host/bin/ug-backup
++++ b/host/bin/ug-backup
+@@ -74,7 +74,7 @@ else
+     log "the agent home was not saved in 2 attempts"
+   else
+     log "saved the agent home to $repo"
+-    subset=$(( 10#$(date +%j) % 100 + 1 ))
++    subset=$(( 10#$(date +%j) % 100 ))
+     err=$("$restic_bin" -r "$repo" check --read-data-subset=$subset/100 2>&1 >/dev/null) || status=$?
+     if [[ $status -ne 0 ]]; then
+       log "checking the repo $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }"

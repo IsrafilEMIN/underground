@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-home-tar b/host/agent/agent-home-tar
+index 6dd95d2..c715e7b 100755
+--- a/host/agent/agent-home-tar
++++ b/host/agent/agent-home-tar
+@@ -27,7 +27,6 @@ if [[ -f $home/.omp/stats.db ]]; then
+ fi
+ 
+ args=(--no-xattrs
+-  --exclude ./.omp/agent/cache
+   --exclude 'models.db*'
+   --exclude node_modules)
+ copies=()

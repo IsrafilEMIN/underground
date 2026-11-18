@@ -1,0 +1,12 @@
+diff --git a/host/bin/ug-backup b/host/bin/ug-backup
+index 4aa1563..867dee9 100755
+--- a/host/bin/ug-backup
++++ b/host/bin/ug-backup
+@@ -72,6 +72,7 @@ else
+   done
+   if [[ $status -ne 0 ]]; then
+     log "the agent home was not saved in 2 attempts"
++    date +%s >"$backup/last"
+   else
+     log "saved the agent home to $repo"
+     subset=$(( 10#$(date +%j) % 100 + 1 ))

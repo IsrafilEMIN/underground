@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+index 8b92d0c..bdf42fa 100755
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -44,6 +44,7 @@ sync_repo() {
+       ;;
+     *)
+       printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status
++      git update-ref --no-deref HEAD "$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"
+       return 0
+       ;;
+   esac

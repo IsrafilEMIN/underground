@@ -379,7 +379,24 @@ ug_check_main_rule() {
   ug_check_codeowners "$(cat "$file")" "$login" "$file" "$open" || return 1
 
   ug_check_rulesets "$repo" "$open" || return 1
-  ug_say same "main rule" "GitHub merges to main of $repo only with the approval of @$login (ruleset $ug_ruleset_id)"
+  ug_check_required_tests "$repo" "$open" || return 1
+  ug_say same "main rule" "GitHub merges to main of $repo only with the approval of @$login and a green tests check (ruleset $ug_ruleset_id)"
+}
+
+ug_check_required_tests() {
+  local repo=$1 open=$2 ids id required
+  ids=$(gh api "repos/$repo/rulesets?per_page=100" | jq -r '.[] | select(.enforcement == "active" and .target == "branch") | .id') ||
+    { printf '%scannot read the rulesets of %s from GitHub\n' "$open" "$repo" >&2; return 1; }
+  for id in $ids; do
+    required=$(gh api "repos/$repo/rulesets/$id" | jq -r '
+      select((.conditions.ref_name.include // []) | any(. == "~DEFAULT_BRANCH" or . == "refs/heads/main"))
+      | .rules[]? | select(.type == "required_status_checks")
+      | .parameters.required_status_checks[]?.context') ||
+      { printf '%scannot read ruleset %s of %s from GitHub\n' "$open" "$id" "$repo" >&2; return 1; }
+    grep -qxF tests <<<"$required" && return 0
+  done
+  printf '%sno active ruleset of %s requires the check "tests" on main, so a pull request with failing tests can merge. Add it in the repo settings under Rules: Require status checks to pass, check "tests".\n' "$open" "$repo" >&2
+  return 1
 }
 
 ug_check_repo_rule() {

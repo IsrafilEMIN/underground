@@ -297,3 +297,64 @@ for item in "$root"/* "$root"/.[!.]*; do
       ;;
   esac
 done
+
+gateway_port=$(ug_fact gateway_port)
+usage_broker_port=$(ug_fact usage_broker_port)
+
+agent_http() {
+  local url=$1 out
+  out=$( (cd / && ug_as "$agent_user" curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url") 2>/dev/null ) || true
+  printf '%s\n' "${out:-no answer}"
+}
+
+models_url=http://127.0.0.1:${gateway_port}/v1/models
+models_noauth=$(agent_http "$models_url")
+[[ $models_noauth == 401 ]] ||
+  ug_die ug-agent-setup "$models_url answered $models_noauth with no bearer; it must answer 401, or whatever reaches port $gateway_port can call the models; setup stops here"
+models=$( (cd / && printf 'header = "Authorization: Bearer %s"\n' "$(tr -d '[:space:]' <"$root/gateway-token")" |
+  ug_as "$agent_user" curl -K - -sS -w $'\n%{http_code}' --max-time 10 "$models_url" 2>/dev/null) ) || true
+models_code=${models##*$'\n'}
+models_list=${models%$'\n'*}
+[[ -n $models_code ]] || models_code="did not answer"
+[[ $models_code == 200 ]] ||
+  ug_die ug-agent-setup "$models_url answered $models_code with the bearer of $root/gateway-token, so the agent cannot call the gateway; setup stops here"
+[[ $models_list == *'"id":'* ]] ||
+  ug_die ug-agent-setup "$models_url answered 200 with an empty model list, so the agent has no model to call; setup stops here"
+ug_say ok "gateway auth" "$models_url: 401 without a bearer, 200 with the bearer of $root/gateway-token, which lists at least one model"
+
+usage_url=http://127.0.0.1:${usage_broker_port}/v1/usage
+usage_code=$(agent_http "$usage_url")
+if [[ $usage_code == 200 ]]; then
+  ug_say ok "usage broker" "$usage_url: 200"
+else
+  ug_say ok "usage broker" "warning: $usage_url answered $usage_code; /usage needs each provider's usage endpoint, so setup continues"
+fi
+
+model_start=$(date +%s)
+model_rc=0
+model_out=$( (cd / && ug_as "$agent_user" /bin/sh -c '
+  set -m
+  unset UG_REPO
+  "$1" -p "Reply with: ok" </dev/null & child=$!
+  ( i=$2
+    while [ "$i" -gt 0 ]; do
+      kill -0 "$child" 2>/dev/null || exit 0
+      sleep 1
+      i=$(( i - 1 ))
+    done
+    kill -TERM -- "-$child" 2>/dev/null
+    sleep 5
+    kill -KILL -- "-$child" 2>/dev/null ) >/dev/null 2>&1 &
+  wait "$child" 2>/dev/null
+  exit $?
+' sh "$code/agent-start" 60 2>&1) ) || model_rc=$?
+model_elapsed=$(( $(date +%s) - model_start ))
+model_cut=""
+[[ $model_elapsed -lt 60 ]] || model_cut=", cut off at the 60 s limit"
+model_note=${model_out//$'\n'/ }
+model_note=${model_note:0:200}
+if [[ $model_rc -eq 0 ]]; then
+  ug_say ok "model call" "$code/agent-start answered in ${model_elapsed}s: ${model_note:-no output}"
+else
+  ug_say ok "model call" "warning: $code/agent-start exited $model_rc after ${model_elapsed}s$model_cut: ${model_note:-no output}; setup continues because the gateway and the usage broker answered"
+fi

@@ -1,0 +1,13 @@
+diff --git a/host/lib/ug.bash b/host/lib/ug.bash
+index 2a90aeb..9da0a76 100644
+--- a/host/lib/ug.bash
++++ b/host/lib/ug.bash
+@@ -269,8 +269,6 @@ ug_read_sources() {
+     [[ -n $line && $line != '#'* ]] || continue
+     read -r path target extra <<<"$line"
+     [[ -n $path ]] || continue
+-    [[ $path != plugin ]] ||
+-      { ug_err "$tool" "in $file: \"$line\": plugins are not sources; they come from omp's own github marketplace"; return 1; }
+     [[ -n $target && -z $extra ]] ||
+       { ug_err "$tool" "in $file: \"$line\": a source is a repo path and a target, and nothing else"; return 1; }
+     path=$(ug_expand_home "$path" "$home")

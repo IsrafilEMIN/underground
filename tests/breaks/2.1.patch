@@ -1,0 +1,11 @@
+diff --git a/host/agent/agent-unpack b/host/agent/agent-unpack
+index 25d8ce3..83e081c 100755
+--- a/host/agent/agent-unpack
++++ b/host/agent/agent-unpack
+@@ -61,6 +61,5 @@ fi
+ 
+ for name in "${new[@]}"; do
+   rm -rf -- "$dest/$name"
+-  mv -- "$tmp/$name" "$dest/$name"
+ done
+ printf '%s\n' "${new[@]}" >"$dest/.ug-names"
