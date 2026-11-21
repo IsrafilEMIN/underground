@@ -9,6 +9,10 @@ while [[ -L $self ]]; do
 done
 # shellcheck source=host/lib/ug.bash disable=SC1091
 source "$(dirname "$self")/../lib/ug.bash"
+# shellcheck source=host/lib/services.bash disable=SC1091
+source "$(dirname "$self")/../lib/services.bash"
+# shellcheck source=host/lib/sources.bash disable=SC1091
+source "$(dirname "$self")/../lib/sources.bash"
 
 UG=$HOME/$(ug_fact owner_data)
 agent=$(ug_fact agent_user)

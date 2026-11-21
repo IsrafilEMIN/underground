@@ -1,8 +1,8 @@
-diff --git a/host/lib/ug.bash b/host/lib/ug.bash
-index 2a90aeb..9da0a76 100644
---- a/host/lib/ug.bash
-+++ b/host/lib/ug.bash
-@@ -269,8 +269,6 @@ ug_read_sources() {
+diff --git a/host/lib/sources.bash b/host/lib/sources.bash
+index 44089d4..963a2bc 100644
+--- a/host/lib/sources.bash
++++ b/host/lib/sources.bash
+@@ -17,8 +17,6 @@ ug_read_sources() {
      [[ -n $line && $line != '#'* ]] || continue
      read -r path target extra <<<"$line"
      [[ -n $path ]] || continue

@@ -4,6 +4,8 @@
 # a parse error inside the library only shows up here, as a missing function.
 # shellcheck disable=SC1091
 source "$UG_REPO_ROOT/host/lib/ug.bash" || return 1
+# shellcheck disable=SC1091
+source "$UG_REPO_ROOT/host/lib/sources.bash" || return 1
 [[ $(type -t ug_read_sources) == function ]] || return 1
 
 read_sources() {
