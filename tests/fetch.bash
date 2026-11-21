@@ -23,6 +23,8 @@ fetch_fixture() {
   printf '#!/bin/bash\nprintf %%s "${UG_NOTICES-}" >%q\n' "$UG_TMPDIR/notices" >"$fx_root/code/omp-stub"
   chmod +x "$fx_root/code/omp-stub"
   ln -s "$fx_root/code/omp-stub" "$fx_root/code/bin/omp"
+  printf '#!/bin/bash\n[[ ! -f %q ]] || cat %q\n' "$UG_TMPDIR/open-prs" "$UG_TMPDIR/open-prs" >"$fx_root/code/bin/gh"
+  chmod +x "$fx_root/code/bin/gh"
   render "$UG_REPO_ROOT/host/agent/agent-start" "$UG_TMPDIR/agent-start" \
     AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9
   fx_git init -q --bare -b main "$fx_origin" || fail 'cannot make the bare origin'
@@ -42,6 +44,31 @@ fx_status() {
   local line=
   [[ -f $fx_clone/.git/ug-fetch.status ]] && read -r line <"$fx_clone/.git/ug-fetch.status"
   printf '%s\n' "$line"
+}
+
+fx_age() {
+  touch -t 202001010000 "$@" || fail "cannot age $*"
+}
+
+fx_worktree() {
+  local name=$1 start=$2
+  fx_git -C "$fx_clone" worktree add -q -b "$name" "$UG_TMPDIR/$name" "$start" || fail "cannot add the worktree $name"
+}
+
+fx_age_worktree() {
+  local name=$1 gitdir=$fx_clone/.git/worktrees/$1
+  fx_age "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD" "$fx_clone/.git/logs/refs/heads/$name"
+}
+
+fx_has_ref() {
+  fx_git --git-dir="$1" show-ref --verify --quiet "$2"
+}
+
+fx_unique_commit() {
+  local name=$1 parent=${2:-HEAD} blob tree
+  blob=$(printf '%s\n' "$name" | fx_git -C "$UG_TMPDIR/seed" hash-object -w --stdin) || fail "cannot store the blob $name"
+  tree=$(printf '100644 blob %s\t%s\n' "$blob" "$name" | fx_git -C "$UG_TMPDIR/seed" mktree) || fail "cannot make the tree $name"
+  fx_git -C "$UG_TMPDIR/seed" commit-tree -p "$parent" -m "$name" "$tree" || fail "cannot make the side commit $name"
 }
 
 fx_start() {
@@ -130,4 +157,88 @@ t_7_4() {
   fx_start
   assert_eq "$fx_new" "$(fx_head)" 'HEAD moves to the commit pushed to origin'
   assert_eq '' "$(fx_git -C "$fx_clone" status --porcelain)" 'the index and files match the new HEAD'
+}
+
+t_7_5() {
+  fetch_fixture
+  fx_worktree old "$fx_old"
+  fx_worktree fresh "$fx_old"
+  fx_git -C "$fx_clone" branch stale "$fx_old" || fail 'cannot make the stale branch'
+  fx_age_worktree old
+  fx_age "$fx_clone/.git/logs/refs/heads/stale" "$fx_clone/.git/logs/refs/heads/main"
+  fx_start
+  assert_eq no "$([[ -e $UG_TMPDIR/old ]] && echo yes || echo no)" 'an idle worktree at a commit in origin/main is removed'
+  assert_eq no "$(fx_has_ref "$fx_clone/.git" refs/heads/old && echo yes || echo no)" 'the branch of the removed worktree is deleted'
+  assert_eq no "$(fx_has_ref "$fx_clone/.git" refs/heads/stale && echo yes || echo no)" 'an idle branch in origin/main is deleted'
+  assert_eq yes "$([[ -d $UG_TMPDIR/fresh ]] && echo yes || echo no)" 'a worktree used in the last 3 days stays'
+  assert_eq yes "$(fx_has_ref "$fx_clone/.git" refs/heads/main && echo yes || echo no)" 'the default branch stays'
+  assert_eq "$fx_new" "$(fx_head)" 'the main checkout stays at origin/main'
+}
+
+t_7_6() {
+  fetch_fixture
+  fx_worktree uniq "$fx_old"
+  printf 'only here\n' >"$UG_TMPDIR/uniq/u"
+  fx_git -C "$UG_TMPDIR/uniq" add u || fail 'cannot stage the unique file'
+  fx_git -C "$UG_TMPDIR/uniq" commit -q -m unique || fail 'cannot commit the unique file'
+  fx_git -C "$fx_clone" branch lone uniq || fail 'cannot make the lone branch'
+  fx_age_worktree uniq
+  fx_age "$fx_clone/.git/logs/refs/heads/lone"
+  fx_start
+  assert_eq yes "$([[ -f $UG_TMPDIR/uniq/u ]] && echo yes || echo no)" 'a worktree with a commit that GitHub does not hold stays'
+  assert_eq yes "$(fx_has_ref "$fx_clone/.git" refs/heads/lone && echo yes || echo no)" 'a branch with a commit that GitHub does not hold stays'
+  fx_start
+  local notices
+  notices=$(cat "$UG_TMPDIR/notices")
+  assert_contains "cleanup of $fx_repo kept 2 items" "$notices" 'the next start names the kept items'
+  assert_contains "$UG_TMPDIR/uniq" "$notices" 'the notice names the kept worktree'
+  assert_contains ' lone' "$notices" 'the notice names the kept branch'
+}
+
+t_7_7() {
+  fetch_fixture
+  printf 'same\n' >"$UG_TMPDIR/seed/f"
+  printf 'also\n' >"$UG_TMPDIR/seed/g"
+  fx_git -C "$UG_TMPDIR/seed" add f g || fail 'cannot stage f and g in the seed'
+  fx_new=$(fx_commit 'add f and g')
+  local name
+  for name in twin near; do
+    fx_worktree "$name" "$fx_old"
+    printf 'same\n' >"$UG_TMPDIR/$name/f"
+    fx_git -C "$UG_TMPDIR/$name" add f || fail "cannot stage f in $name"
+    fx_git -C "$UG_TMPDIR/$name" commit -q -m "$name adds f" || fail "cannot commit f in $name"
+    fx_age_worktree "$name"
+  done
+  printf 'also\n' >"$UG_TMPDIR/twin/g"
+  printf 'other\n' >"$UG_TMPDIR/near/g"
+  fx_age "$fx_clone/.git/worktrees/twin/index" "$fx_clone/.git/worktrees/near/index"
+  fx_start
+  assert_eq no "$([[ -e $UG_TMPDIR/twin ]] && echo yes || echo no)" 'a worktree whose commit and untracked file match origin/main is removed'
+  assert_eq yes "$([[ -f $UG_TMPDIR/near/g ]] && echo yes || echo no)" 'a worktree with an untracked file that differs from origin/main stays'
+}
+
+t_7_8() {
+  local closed early open_head
+  fetch_fixture
+  closed=$(fx_unique_commit closed)
+  early=$(fx_unique_commit early)
+  open_head=$(fx_unique_commit open-head "$early")
+  fx_git -C "$UG_TMPDIR/seed" push -q origin "$closed:refs/heads/done" "$closed:refs/pull/7/head" "$early:refs/heads/part" "$open_head:refs/heads/live" "$open_head:refs/pull/8/head" ||
+    fail 'cannot push the pull request refs'
+  printf '8 live\n' >"$UG_TMPDIR/open-prs"
+  fx_git -C "$fx_clone" fetch -q origin || fail 'cannot fetch the pull request branches'
+  fx_age "$fx_clone/.git/logs/refs/remotes/origin/done" "$fx_clone/.git/logs/refs/remotes/origin/part"
+  fx_start
+  assert_eq no "$(fx_has_ref "$fx_origin" refs/heads/done && echo yes || echo no)" 'an idle branch at the head of a closed pull request is deleted on origin'
+  assert_eq yes "$(fx_has_ref "$fx_origin" refs/heads/part && echo yes || echo no)" 'a branch held only by an open pull request stays on origin'
+}
+
+t_7_9() {
+  fetch_fixture
+  fx_git -C "$UG_TMPDIR/seed" push -q origin "$fx_old:refs/heads/opened" || fail 'cannot push the opened branch'
+  printf '9 opened\n' >"$UG_TMPDIR/open-prs"
+  fx_git -C "$fx_clone" fetch -q origin || fail 'cannot fetch the opened branch'
+  fx_age "$fx_clone/.git/logs/refs/remotes/origin/opened"
+  fx_start
+  assert_eq yes "$(fx_has_ref "$fx_origin" refs/heads/opened && echo yes || echo no)" 'the head branch of an open pull request stays on origin, even when its tip is in origin/main'
 }

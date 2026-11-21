@@ -31,20 +31,156 @@ start_omp() {
   exit 0
 }
 
+sweep_idle() {
+  local tip=$1 newest=0 t f
+  shift
+  for f in "$@"; do
+    [[ -e $f ]] || continue
+    t=$(stat -f %m "$f") || continue
+    if ((t > newest)); then newest=$t; fi
+  done
+  ((newest)) || newest=$(git log -1 --format=%ct "$tip") || return 1
+  (($(date +%s) - newest >= 259200))
+}
+
+sweep_pulls() {
+  [[ -z $sweep_pulls_done ]] || return 0
+  sweep_pulls_done=1
+  git fetch --quiet --no-tags --prune origin '+refs/pull/*/head:refs/ug/pull/*'
+}
+
+sweep_commits_safe() {
+  local tip=$1 base=$2 n mb p paths=()
+  git merge-base --is-ancestor "$tip" "$base" && return 0
+  sweep_pulls
+  while IFS= read -r n; do
+    [[ $sweep_open_numbers == *" $n "* ]] || return 0
+  done < <(git for-each-ref --contains "$tip" --format='%(refname:lstrip=3)' refs/ug/pull)
+  mb=$(git merge-base "$base" "$tip") || return 1
+  while IFS= read -r -d '' p; do paths+=("$p"); done < <(git diff --name-only -z "$mb" "$tip")
+  ((${#paths[@]})) || return 0
+  git diff --quiet "$base" "$tip" -- "${paths[@]}"
+}
+
+sweep_files_safe() {
+  local wt=$1 base=$2 p blob paths=()
+  while IFS= read -r -d '' p; do paths+=("$p"); done < <(git -C "$wt" diff --name-only -z HEAD; git -C "$wt" diff --cached --name-only -z)
+  if ((${#paths[@]})); then
+    git -C "$wt" diff --quiet "$base" -- "${paths[@]}" || return 1
+    git -C "$wt" diff --cached --quiet "$base" -- "${paths[@]}" || return 1
+  fi
+  while IFS= read -r -d '' p; do
+    blob=$(git rev-parse --verify --quiet "$base:$p") || return 1
+    [[ $(git -C "$wt" hash-object -- "$p") == "$blob" ]] || return 1
+  done < <(git -C "$wt" ls-files -o -z --exclude-standard)
+  return 0
+}
+
+sweep_worktree() {
+  local wt=$1 head=$2 branch=$3 gitdir
+  [[ -z $branch || ( $branch != "$default" && $sweep_open_branches != *$'\n'"$branch"$'\n'* ) ]] || return 0
+  gitdir=$(git -C "$wt" rev-parse --absolute-git-dir) || return 0
+  sweep_idle "$head" "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD" ${branch:+".git/logs/refs/heads/$branch"} || return 0
+  if ! sweep_commits_safe "$head" "$base" || ! sweep_files_safe "$wt" "$base"; then
+    kept+=("$wt")
+    return 0
+  fi
+  if ! git worktree remove --force "$wt"; then
+    problems+=("cannot remove the worktree $wt")
+    return 0
+  fi
+  printf 'cleanup: removed the worktree %s\n' "$wt"
+  if [[ -n $branch ]] && git branch -D -q "$branch"; then printf 'cleanup: deleted the branch %s\n' "$branch"; fi
+}
+
+sweep_repo() {
+  local repo=$1 base=$2 default=${2#origin/} prs n b line wt= head= branch= locked= main_checkout_seen= tip where kept=() problems=() p
+  export GIT_OPTIONAL_LOCKS=0 GIT_LITERAL_PATHSPECS=1
+  sweep_pulls_done=
+  sweep_open_numbers=' '
+  sweep_open_branches=$'\n'
+  if ! prs=$(gh pr list -R "$repo" --state open --limit 1000 --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"'); then
+    printf 'cleanup of %s skipped: cannot list its open pull requests\n' "$repo" >.git/ug-clean.summary
+    return 0
+  fi
+  while read -r n b; do
+    [[ -n $n ]] || continue
+    sweep_open_numbers+="$n "
+    sweep_open_branches+="$b"$'\n'
+  done <<<"$prs"
+
+  git worktree prune
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*) wt=${line#worktree } head= branch= locked= ;;
+      'HEAD '*) head=${line#HEAD } ;;
+      'branch refs/heads/'*) branch=${line#branch refs/heads/} ;;
+      locked | 'locked '*) locked=1 ;;
+      '')
+        if [[ -z $main_checkout_seen ]]; then
+          main_checkout_seen=1
+        elif [[ -n $wt && -n $head && -z $locked ]]; then
+          sweep_worktree "$wt" "$head" "$branch"
+        fi
+        wt=
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  while read -r b tip where; do
+    [[ $b != "$default" && -z $where && $sweep_open_branches != *$'\n'"$b"$'\n'* ]] || continue
+    sweep_idle "$tip" ".git/logs/refs/heads/$b" || continue
+    if ! sweep_commits_safe "$tip" "$base"; then
+      kept+=("$b")
+    elif git branch -D -q "$b"; then
+      printf 'cleanup: deleted the branch %s\n' "$b"
+    fi
+  done < <(git for-each-ref --format='%(refname:lstrip=2) %(objectname) %(worktreepath)' refs/heads)
+
+  while read -r b tip; do
+    [[ $b != HEAD && $b != "$default" && $sweep_open_branches != *$'\n'"$b"$'\n'* ]] || continue
+    sweep_idle "$tip" ".git/logs/refs/remotes/origin/$b" || continue
+    if ! sweep_commits_safe "$tip" "$base"; then
+      kept+=("origin/$b")
+    elif git push --quiet origin --delete "$b"; then
+      printf 'cleanup: deleted the branch %s on origin\n' "$b"
+    else
+      problems+=("cannot delete the branch $b on origin")
+    fi
+  done < <(git for-each-ref --format='%(refname:lstrip=3) %(objectname)' refs/remotes/origin)
+
+  {
+    for p in ${problems[@]+"${problems[@]}"}; do printf 'cleanup of %s: %s\n' "$repo" "$p"; done
+    ((${#kept[@]} == 0)) || printf 'cleanup of %s kept %s items idle for 3 days with work that GitHub does not hold; push or delete them: %s\n' "$repo" "${#kept[@]}" "${kept[*]}"
+  } >.git/ug-clean.summary
+  [[ -s .git/ug-clean.summary ]] || rm -f .git/ug-clean.summary
+}
+
 sync_repo() {
-  local clone=$1
+  local clone=$1 repo=$2
   cd "$clone" || return 0
   printf '%s %s\n' "$$" "$(date +%s)" >.git/ug-fetch.pid
-  /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c '
-    git fetch --quiet --no-tags origin || exit 1
+  /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c "$(declare -f sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo)"'
+    git fetch --quiet --no-tags --prune origin || exit 1
     base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
-    git reset -q --hard "$base"
-  '
+    git reset -q --hard "$base" || exit 1
+    sweep_repo "$1" "$base"
+    exit 0
+  ' _ "$repo"
   case $? in
     0) printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
     75) printf 'skipped: another fetch holds the lock\n' ;;
     *) printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
   esac
+}
+
+clean_report() {
+  local clone=$1 line
+  [[ -f $clone/.git/ug-clean.summary ]] || return 0
+  while IFS= read -r line; do
+    [[ -z $line ]] || add_notice "$line"
+  done <"$clone/.git/ug-clean.summary"
+  rm -f "$clone/.git/ug-clean.summary"
 }
 
 sync_report() {
@@ -99,5 +235,6 @@ fi
 cd "$clone"
 git -C "$clone" config remote.origin.followRemoteHEAD always
 sync_report "$clone"
-GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo); sync_repo \"\$@\"" _ "$clone" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
+clean_report "$clone"
+GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo); sync_repo \"\$@\"" _ "$clone" "$UG_REPO" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
 start_omp "$@"
