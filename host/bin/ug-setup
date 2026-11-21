@@ -27,7 +27,6 @@ case $src/ in
     exit 64
     ;;
 esac
-green=$(ug_paint 1 green) yellow=$(ug_paint 1 yellow) plain=$(ug_paint 1 off)
 
 bin_dir="$HOME/.local/bin"
 agents_dir="$HOME/Library/LaunchAgents"
@@ -38,6 +37,7 @@ trap 'ug_stopped $? $LINENO "$BASH_COMMAND" ug-setup host/bin/ug-setup' ERR
 later=()
 
 if [[ ${UG_SETUP_PULLED:-} != 1 ]]; then
+  ug_step checkout
   ug_pull_main "$src" ug-setup || exit 1
   UG_SETUP_PULLED=1 exec "$BASH" "$src/host/bin/ug-setup"
 fi
@@ -54,10 +54,11 @@ done
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
 
+ug_step tools
 install -d -m 700 "$data" "$data/restic"
 if [[ -e $data/gh ]]; then
   rm -rf "$data/gh"
-  ug_say changed gh "deleted the old staging folder $data/gh; the root step now installs gh for the agent itself"
+  ug_say changed gh "removed the old staging folder $data/gh"
 fi
 [[ -d $bin_dir ]] || install -d -m 755 "$bin_dir"
 
@@ -72,26 +73,26 @@ install_restic() {
   bunzip2 -c "$archive" >"$bin" || ug_die ug-setup "bunzip2 of $url failed; nothing changed"
   chmod 555 "$bin"
   mv -f "$bin" "$dest"
-  ug_say ok "restic $restic_pin" "unpacked from the checked archive into $dest"
+  ug_say ok restic "$restic_pin ready"
 }
 
 setup_backup() {
   local backup="$data/backup"
-  local fix="write $backup/config with a repo=sftp:<user>@<host>:<path> line, plus optional wake=<command> and sleep=<command> lines; wake runs when the host does not answer ssh, sleep after each backup; until then, no backup runs"
+  local fix="write $backup/config: repo=sftp:<user>@<host>:<path>, optional wake=<cmd> and sleep=<cmd>; no backup runs until then"
   local err='' answer='' wake_in='' sleep_in='' tmp restic_bin status=0 out
   install -d -m 700 "$backup"
   if [[ ! -s $backup/password ]]; then
     (umask 077 && openssl rand -base64 32 >"$backup/password") || ug_die ug-setup "cannot write $backup/password"
-    ug_say changed backup "made the password $backup/password"
-    later+=("keep a copy of $backup/password in your password manager; without it, the backup cannot be opened after a loss of this mac")
+    ug_say changed "backup password" "created $backup/password"
+    later+=("save $backup/password in your password manager; without it, a lost mac means a lost backup")
   fi
   if [[ ! -f $backup/config ]] || ! err=$(backup_target_read "$backup/config" 2>&1 >/dev/null); then
-    [[ -z $err ]] || ug_say ok backup "${err//$'\n'/ }"
+    [[ -z $err ]] || ug_say warn backup "${err//$'\n'/ }"
     if [[ -t 0 ]]; then
-      read -r -p "backup repository address, as sftp:<user>@<host>:<path>, empty for none: " answer || answer=''
+      read -r -p "  ? backup repository (sftp:user@host:path, empty for none): " answer || answer=''
       if [[ -n $answer ]]; then
-        read -r -p "command to wake the backup host when it does not answer ssh, empty for none: " wake_in || wake_in=''
-        read -r -p "command to put the backup host back to sleep after a backup, empty for none: " sleep_in || sleep_in=''
+        read -r -p "  ? command to wake the backup host (empty for none): " wake_in || wake_in=''
+        read -r -p "  ? command to put it back to sleep (empty for none): " sleep_in || sleep_in=''
         tmp=$(mktemp "$backup/.config.XXXXXX")
         cleanup+=("$tmp")
         {
@@ -101,9 +102,9 @@ setup_backup() {
         } >"$tmp"
         if err=$(backup_target_read "$tmp" 2>&1 >/dev/null); then
           put "$tmp" "$backup/config" 600
-          ug_say changed backup "wrote $backup/config with $answer"
+          ug_say changed backup "wrote $backup/config ($answer)"
         else
-          ug_say ok backup "those answers are not a valid config: ${err//$'\n'/ }; nothing was written"
+          ug_say warn backup "invalid answers, nothing written: ${err//$'\n'/ }"
           later+=("$fix")
         fi
       else
@@ -115,37 +116,37 @@ setup_backup() {
   fi
   backup_target_read "$backup/config" >/dev/null 2>&1 || return 0
   if ! backup_target_up; then
-    ug_say ok backup "$target does not answer ssh, or the ssh key does not work without a prompt; run ssh-keygen -t ed25519, then ssh-copy-id $target"
+    ug_say warn backup "$target does not answer ssh without a prompt; run ssh-keygen -t ed25519, then ssh-copy-id $target"
     return 0
   fi
   restic_bin="$data/restic/$restic_pin/restic"
   out=$(RESTIC_PASSWORD_FILE="$backup/password" "$restic_bin" -r "$repo" cat config 2>&1 >/dev/null) || status=$?
   case $status in
-    0) ug_say ok backup "$repo is reachable and the backup password opens it" ;;
-    10) ug_say ok backup "$repo is reachable but holds no repository yet; ug-backup creates it on its first run" ;;
-    12) ug_say ok backup "$repo does not open with $backup/password; the backup password is not the one the repository was created with" ;;
-    *) ug_say ok backup "restic could not check $repo (exit $status): ${out//$'\n'/ }" ;;
+    0) ug_say ok backup "$repo opens with the password" ;;
+    10) ug_say ok backup "$repo is empty; ug-backup creates it on its first run" ;;
+    12) ug_say warn backup "$repo does not open with $backup/password; wrong password" ;;
+    *) ug_say warn backup "restic cannot check $repo (exit $status): ${out//$'\n'/ }" ;;
   esac
 }
 
 check_source() {
   local path=$1 up rname bref remote dirty
   up=$(git -C "$path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || up=
-  [[ -n $up ]] || { ug_say ok "source $path" "has no upstream branch; setup did not update it"; return 0; }
+  [[ -n $up ]] || { ug_say warn source "$path has no upstream branch; not updated"; return 0; }
   rname=${up%/*}
   bref=${up#*/}
   remote=$(GIT_TERMINAL_PROMPT=0 git -C "$path" ls-remote "$rname" "refs/heads/$bref" 2>/dev/null | cut -f1) || remote=
-  [[ -n $remote ]] || { ug_say ok "source $path" "cannot read $up from origin; check the network, setup did not update it"; return 0; }
+  [[ -n $remote ]] || { ug_say warn source "$path: cannot read $up from origin; check the network; not updated"; return 0; }
   if git -C "$path" cat-file -e "$remote^{commit}" 2>/dev/null && git -C "$path" merge-base --is-ancestor "$remote" HEAD; then
-    ug_say same "source $path" "already has $up"
+    ug_say same source "$path up to date"
     return 0
   fi
   dirty=$(git -C "$path" status --porcelain 2>/dev/null) || dirty=unknown
-  [[ -z $dirty ]] || { ug_say ok "source $path" "has uncommitted changes; setup did not update it"; return 0; }
+  [[ -z $dirty ]] || { ug_say warn source "$path has uncommitted changes; not updated"; return 0; }
   if GIT_TERMINAL_PROMPT=0 git -C "$path" pull --quiet --ff-only 2>/dev/null; then
-    ug_say changed "source $path" "fast-forwarded to $up"
+    ug_say changed source "$path fast-forwarded to $up"
   else
-    ug_say ok "source $path" "$up cannot fast-forward onto its origin; setup did not update it"
+    ug_say warn source "$path cannot fast-forward to $up; not updated"
   fi
 }
 
@@ -153,31 +154,31 @@ setup_sources() {
   local pairs path target
   if [[ ! -f $data/sources ]]; then
     if [[ -t 0 ]]; then
-      read -r -p "path of the config repo to sync into the agent, empty for none: " path || path=''
+      read -r -p "  ? config repo to sync into the agent (empty for none): " path || path=''
       path=$(ug_expand_home "$path" "$HOME")
       if [[ -n $path ]]; then
-        read -r -p "target inside the agent home [.omp/agent]: " target || target=''
+        read -r -p "  ? target in the agent home (.omp/agent): " target || target=''
         [[ -n $target ]] || target=.omp/agent
         printf '%s %s\n' "$path" "$target" >"$data/sources"
-        ug_say changed sources "wrote $data/sources with $path $target"
+        ug_say changed sources "wrote $data/sources ($path $target)"
       else
         : >"$data/sources"
-        ug_say changed sources "wrote an empty $data/sources; add one line per config repo to sync"
+        ug_say changed sources "wrote an empty $data/sources"
       fi
     else
       : >"$data/sources"
-      ug_say ok sources "wrote an empty $data/sources; add one line per config repo to sync"
+      ug_say changed sources "wrote an empty $data/sources"
     fi
   fi
   pairs=$(ug_read_sources "$data/sources" "$HOME" ug-setup) ||
     ug_die ug-setup "fix $data/sources and run host/bin/ug-setup again"
   while IFS=$'\t' read -r path target; do
     [[ -n $path ]] || continue
-    [[ -d $path/.git ]] || { ug_say ok "source $path" "is not a git repository; setup did not update it"; continue; }
+    [[ -d $path/.git ]] || { ug_say warn source "$path is not a git repository; not updated"; continue; }
     check_source "$path"
   done <<<"$pairs"
   [[ -s $data/sources ]] ||
-    later+=("write $data/sources with one line per config repo to sync into the agent, as <local repo path> <target inside the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; ~ is your home, blank lines and lines that start with # are skipped; until then, omp does not update the agent's config")
+    later+=("add config repos to $data/sources, one per line: <repo path> <target in the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; until then, omp does not update the agent's config")
 }
 
 put() {
@@ -205,7 +206,7 @@ retire_agents() {
     grep -qxF "$label" <<<"$keep" && continue
     err=$(ug_stop_service "gui/$UID/$label") || ug_die ug-setup "$err"
     rm -f "$plist"
-    ug_say changed "service $label" "booted out and deleted; this version of underground does not run it"
+    ug_say changed "${label#com.underground.}" "retired: booted out, plist deleted"
   done
 }
 
@@ -218,7 +219,7 @@ install_service_code() {
   done
   chmod 555 "$dir/host/bin/ug-backup" "$dir/host/bin/ug-auth"
   link "$dir/host/bin/ug-auth" "$bin_dir/ug-auth"
-  ug_say ok services "code installed in $dir, ug-auth on PATH as $bin_dir/ug-auth"
+  ug_say ok "service code" "installed in $dir, ug-auth in $bin_dir"
 }
 
 write_addresses() {
@@ -226,18 +227,18 @@ write_addresses() {
   local fix="write $addresses_file with one engine=<ip>:<port> line naming the inference engine"
   engine=$(sed -n 's/^engine=//p' "$addresses_file" 2>/dev/null | head -1) || true
   if [[ $engine =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$ ]]; then
-    ug_say same addresses "$addresses_file holds engine=$engine"
+    ug_say same engine "$engine"
     return 0
   fi
   [[ -t 0 ]] || ug_die ug-setup "no $addresses_file with an engine=<ip>:<port> line, and no terminal to ask for the engine address; $fix"
-  read -r -p "engine address of the inference engine, as <ip>:<port>: " engine || engine=''
+  read -r -p "  ? inference engine address (ip:port): " engine || engine=''
   [[ $engine =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$ ]] || ug_die ug-setup "the engine address '$engine' is not <ip>:<port>; nothing was written. Run setup again, or $fix"
   tmp=$(mktemp "$addresses_file.XXXXXX")
   cleanup+=("$tmp")
   printf 'engine=%s\n' "$engine" >"$tmp"
   chmod 600 "$tmp"
   mv -f "$tmp" "$addresses_file"
-  ug_say changed addresses "wrote $addresses_file with engine=$engine"
+  ug_say changed engine "wrote $engine to $addresses_file"
 }
 
 prepare_services() {
@@ -246,16 +247,19 @@ prepare_services() {
 
 # shellcheck disable=SC2154
 start_services() {
-  local label name scope user template health log rendered out
+  local label name scope user template health log watch rendered out kind
   install -d "$agents_dir"
-  while IFS='|' read -r label name scope user template health log; do
+  while IFS='|' read -r label name scope user template health log watch; do
     rendered=$(mktemp "$agents_dir/.$label.XXXXXX")
     cleanup+=("$rendered")
     out=$(ug_render "$rendered" "$src/$template" "$template" -e "s|@DATA@|$data|g") || ug_die ug-setup "$out"
     ug_service_probe agent "$label" "$health" || ug_die ug-setup "setup cannot check $label; nothing changed for it"
-    out=$(ug_ensure_service "gui/$UID" "$label" "$rendered" "$agents_dir/$label.plist" "${ug_probe[@]}") ||
+    watch=$(ug_service_expand "$watch") || ug_die ug-setup "cannot expand the code paths of $label"
+    out=$(ug_ensure_service "gui/$UID" "$label" "$rendered" "$agents_dir/$label.plist" "$watch" "${ug_probe[@]}") ||
       ug_die ug-setup "$out; read $(ug_service_expand "$log")"
-    ug_say ok "$ug_probe_subject" "$out"
+    kind=changed
+    [[ $out != unchanged* ]] || kind=same
+    ug_say "$kind" "$name" "$out"
   done < <(ug_services agent)
 }
 
@@ -266,28 +270,29 @@ check_path() {
     [[ -n $dir && -x $dir/omp && ! -d $dir/omp ]] && found+=("$dir/omp")
   done
   if [[ ${#found[@]} -eq 0 ]]; then
-    later+=("no omp is on PATH; put $bin_dir on PATH, so that omp starts the agent")
+    later+=("omp is not on PATH; add $bin_dir to PATH")
   elif [[ ${found[0]} != "$bin_dir/omp" ]]; then
-    later+=("the first omp on PATH is ${found[0]}, not the agent launcher $bin_dir/omp; put $bin_dir on PATH before ${found[0]%/omp}")
+    later+=("the first omp on PATH is ${found[0]}; put $bin_dir before ${found[0]%/omp} on PATH")
   elif [[ ${#found[@]} -gt 1 ]]; then
-    later+=("more than one omp is on PATH: ${found[*]}; remove all but $bin_dir/omp")
+    later+=("several omp on PATH (${found[*]}); keep only $bin_dir/omp")
   fi
 }
 
 check_app_repos() {
   local slug repo private login out
   [[ -f $data/app-repos ]] || return 0
+  ug_step "app repos"
   login=$(gh api user | jq -r '.login // empty') || login=""
-  [[ -n $login ]] || { ug_say ok "app repos" "gh has no GitHub login, so setup cannot check the rule on main of the repos of the app; run: gh auth login, then run setup again"; return 0; }
+  [[ -n $login ]] || { ug_say warn "app repos" "gh is not logged in, so setup cannot check main rules; run gh auth login, then setup again"; return 0; }
   slug=$(ug_repo_slug "$src") || slug=""
   while read -r repo private || [[ -n $repo ]]; do
     [[ -n $repo && $repo != "$slug" ]] || continue
     if [[ $private == true ]]; then
-      later+=("GitHub does not enforce the rule on main of $repo, because it is private and a free plan enforces rulesets on public repos only, so the agent could change its main: make $repo public, upgrade the plan, or remove $repo from the app")
+      later+=("$repo is private, so a free GitHub plan does not enforce its main rule and the agent could change main: make it public, upgrade the plan, or remove it from the app")
       continue
     fi
     if out=$(ug_check_repo_rule "$repo" "$login" 2>&1); then
-      ug_say same "main rule of $repo" "GitHub merges to main only with the approval of @$login"
+      ug_say same "main rule" "$repo needs @$login approval"
     else
       later+=("${out//$'\n'/ }")
     fi
@@ -295,28 +300,39 @@ check_app_repos() {
 }
 
 finish() {
-  if [[ ${#later[@]} -eq 0 ]]; then
-    printf '%sug-setup: done; nothing is left to do%s\n' "$green" "$plain"
-    return 0
-  fi
-  printf '%sug-setup: done.%s %sstill to do:%s\n' "$green" "$plain" "$yellow" "$plain"
-  local item
+  local item n=0
+  printf '\n%s%s✓ setup done%s\n' "$(ug_paint 1 bold)" "$(ug_paint 1 green)" "$(ug_paint 1 off)"
+  [[ ${#later[@]} -gt 0 ]] || return 0
+  printf '\n%s%sto do%s\n' "$(ug_paint 1 bold)" "$(ug_paint 1 yellow)" "$(ug_paint 1 off)"
   for item in "${later[@]}"; do
-    printf '  %s-%s %s\n' "$yellow" "$plain" "$item"
+    n=$((n + 1))
+    printf '  %d. %s\n' "$n" "$(ug_short "$item")"
   done
 }
 
 install_restic
 retire_agents
 install_service_code
+
+ug_step backup
 setup_backup
+
+ug_step sources
 setup_sources
+
+ug_step engine
 prepare_services
-ug_say ok "agent user" "running sudo host/bin/ug-agent-setup, which asks for your password"
+
+ug_step "agent user"
+ug_say ok sudo "running host/bin/ug-agent-setup; it may ask for your password"
 no_color=()
 [[ -z ${NO_COLOR:-} ]] || no_color=(env NO_COLOR=1)
 sudo ${no_color[@]+"${no_color[@]}"} "$src/host/bin/ug-agent-setup" || ug_die ug-setup "ug-agent-setup failed, so the agent user is not up to date; fix its error and run host/bin/ug-setup again"
+
 check_app_repos
+
+ug_step services
 start_services
+
 check_path
 finish

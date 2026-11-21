@@ -14,20 +14,41 @@ ug_paint() {
     green) printf '\e[32m' ;;
     red) printf '\e[31m' ;;
     yellow) printf '\e[33m' ;;
+    cyan) printf '\e[36m' ;;
     off) printf '\e[0m' ;;
     *) printf 'ug_paint: unknown color %s\n' "$2" >&2; return 1 ;;
   esac
 }
 
+ug_home=$HOME
+
+ug_short() {
+  local text=$1
+  [[ -z $ug_home || $ug_home == / ]] || text=${text//"$ug_home"/\~}
+  printf '%s' "$text"
+}
+
+ug_step() {
+  printf '\n%s%s▸ %s%s\n' "$(ug_paint 1 bold)" "$(ug_paint 1 cyan)" "$1" "$(ug_paint 1 off)"
+}
+
 ug_say() {
-  local kind=$1 subject=$2 text=$3 color=""
+  local kind=$1 subject text mark color
+  subject=$(ug_short "$2")
+  text=$(ug_short "$3")
   case $kind in
-    same) color=dim ;;
-    changed) color=green ;;
-    ok) ;;
+    same) mark='·' color=dim ;;
+    changed) mark='✓' color=green ;;
+    ok) mark='•' color='' ;;
+    warn) mark='!' color=yellow ;;
     *) printf 'ug_say: unknown kind %s\n' "$kind" >&2; return 1 ;;
   esac
-  printf '%s%s:%s %s%s%s\n' "$(ug_paint 1 bold)" "$subject" "$(ug_paint 1 off)" "${color:+$(ug_paint 1 "$color")}" "$text" "$(ug_paint 1 off)"
+  if [[ $kind == same ]]; then
+    printf '  %s%s %-24s %s%s\n' "$(ug_paint 1 dim)" "$mark" "$subject" "$text" "$(ug_paint 1 off)"
+  else
+    printf '  %s%s%s %s%-24s%s %s%s%s\n' "${color:+$(ug_paint 1 "$color")}" "$mark" "$(ug_paint 1 off)" \
+      "$(ug_paint 1 bold)" "$subject" "$(ug_paint 1 off)" "${color:+$(ug_paint 1 "$color")}" "$text" "$(ug_paint 1 off)"
+  fi
 }
 
 ug_pin() { sed -n "s/^$2=//p" "$1"; }

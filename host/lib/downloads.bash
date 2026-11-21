@@ -17,7 +17,7 @@ ug_fetch_pinned() {
   local url=$1 want=$2 dest=$3 tool=$4
   local name=${dest##*/} dir=${dest%/*} tmp have
   if [[ -f $dest && ! -L $dest ]] && [[ $(ug_sha256 "$dest") == "$want" ]]; then
-    ug_say same "$name" "in place in $dest"
+    ug_say same "$name" "in place"
     return 0
   fi
   [[ -d $dir ]] || install -d "$dir" ||
@@ -44,5 +44,5 @@ ug_fetch_pinned() {
     ug_err "$tool" "cannot move the checked download into $dest; nothing changed"
     return 1
   fi
-  ug_say changed "$name" "downloaded, checked and installed in $dest"
+  ug_say changed "$name" "downloaded and checked"
 }

@@ -42,7 +42,7 @@ ug_user_walls() {
   for key in $keys; do
     login=$(ug_fact "${key}_user") || return 1
     if ! ug_as "$login" /usr/bin/true >/dev/null 2>&1; then
-      printf '%s: sudo does not run as this user, so its walls are not proven\n' "$login"
+      printf '%s: sudo cannot run as this user, so its walls are unproven\n' "$login"
       open=1
       continue
     fi
@@ -55,7 +55,7 @@ ug_user_walls() {
     done
     for target in "${targets[@]}"; do
       if ug_as "$login" /bin/ls "$target" >/dev/null 2>&1; then
-        printf '%s can list %s, a home that is not its own\n' "$login" "$target"
+        printf '%s can list %s, not its own home\n' "$login" "$target"
         open=1
       fi
     done
@@ -80,7 +80,8 @@ trap 'ug_stopped $? $LINENO "$BASH_COMMAND" ug-agent-setup host/bin/ug-agent-set
 owner=${SUDO_USER:-}
 [[ -n $owner && $owner != root ]] || ug_die ug-agent-setup "SUDO_USER is not set; run it with sudo from your own login"
 owner_home=/Users/$owner
-[[ -d $owner_home && ! -L $owner_home ]] || ug_die ug-agent-setup "the home $owner_home is not a folder"
+ug_home=$owner_home
+[[ -d $owner_home && ! -L $owner_home ]] || ug_die ug-agent-setup "$owner_home is not a folder"
 
 ug_check_checkout "$src" ug-agent-setup || exit 1
 
@@ -107,9 +108,10 @@ gh_release=$(ug_pin_checked "$src/VERSIONS" gh_release '^https://github\.com/[A-
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
 
+ug_step "agent users"
 chmod 700 "$owner_home"
-[[ -n $(find "$owner_home" -maxdepth 0 -perm 700 2>/dev/null) ]] || ug_die ug-agent-setup "$owner_home is not mode 700 and would not stay so; nothing else is set up"
-ug_say ok "owner home $owner_home" "mode 700"
+[[ -n $(find "$owner_home" -maxdepth 0 -perm 700 2>/dev/null) ]] || ug_die ug-agent-setup "$owner_home does not stay mode 700; nothing else set up"
+ug_say ok "owner home" "mode 700"
 
 next_uid() {
   local uid
@@ -132,29 +134,30 @@ make_user() {
     dscl . -create "/Users/$name" NFSHomeDirectory "$home"
     out=$(printf 'passwd /Users/%s %s\n' "$name" "$pw" | dscl . 2>&1)
     unset pw
-    [[ $out != *Error* && $out != *Invalid* ]] || ug_die ug-agent-setup "dscl could not set a password for $name: ${out//$'\n'/; }"
-    ug_say changed "user $name" "created, uid $uid, random password never shown"
+    [[ $out != *Error* && $out != *Invalid* ]] || ug_die ug-agent-setup "dscl cannot set a password for $name: ${out//$'\n'/; }"
+    ug_say changed "user $name" "created, uid $uid"
   fi
   dscl . -create "/Users/$name" UserShell "$shell"
   dscl . -create "/Users/$name" IsHidden 1
   [[ " $(dscl . -read /Groups/admin GroupMembership 2>/dev/null) " != *" $name "* ]] ||
-    ug_die ug-agent-setup "$name is in the group admin; remove it: sudo dseditgroup -o edit -d $name -t user admin"
+    ug_die ug-agent-setup "$name is in group admin; remove it: sudo dseditgroup -o edit -d $name -t user admin"
   install -d -m 700 -o "$name" -g staff "$home"
-  ug_say ok "user $name" "standard, hidden, $shell, home $home mode 700"
+  ug_say ok "user $name" "standard, hidden, shell $shell, home mode 700"
 }
 
 make_user "$agent_user" "Underground agent" /bin/sh "$agent_home"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
 
+ug_step "agent tools"
 omp_dir=$root/omp/$omp_pin
 omp_bin=$omp_dir/omp
 install -d -m 755 -o root -g wheel "$root" "$root/omp" "$omp_dir"
 ug_fetch_pinned "$omp_release/v$omp_pin/omp-darwin-arm64" "$omp_sha" "$omp_bin" ug-agent-setup || exit 1
-ug_ensure_owner_mode "$omp_bin" root:wheel 0555 || ug_die ug-agent-setup "cannot make $omp_bin root:wheel mode 0555; the agent could change the binary it runs"
+ug_ensure_owner_mode "$omp_bin" root:wheel 0555 || ug_die ug-agent-setup "cannot make $omp_bin root:wheel 0555; the agent could change it"
 for old in "$root"/omp/*; do
   [[ $old == "$omp_dir" ]] || rm -rf "$old"
 done
-ug_say ok "$root/omp" "omp $omp_pin installed, old versions removed"
+ug_say ok "omp" "$omp_pin installed, old versions removed"
 
 gh_dir=$root/gh/$gh_pin
 gh_bin=$gh_dir/gh
@@ -163,14 +166,14 @@ install -d -m 755 -o root -g wheel "$root/gh" "$gh_dir"
 ug_fetch_pinned "$gh_release/v$gh_pin/gh_${gh_pin}_macOS_arm64.zip" "$gh_zip_sha" "$gh_zip" ug-agent-setup || exit 1
 gh_tmp=$(mktemp "$gh_dir/.gh.XXXXXX")
 cleanup+=("$gh_tmp")
-unzip -p "$gh_zip" "gh_${gh_pin}_macOS_arm64/bin/gh" >"$gh_tmp" || ug_die ug-agent-setup "unzip of $gh_zip failed; nothing changed"
+unzip -p "$gh_zip" "gh_${gh_pin}_macOS_arm64/bin/gh" >"$gh_tmp" || ug_die ug-agent-setup "cannot unzip $gh_zip; nothing changed"
 chown root:wheel "$gh_tmp"
 chmod 555 "$gh_tmp"
 mv -f "$gh_tmp" "$gh_bin"
 for old in "$root"/gh/*; do
   [[ $old == "$gh_dir" ]] || rm -rf "$old"
 done
-ug_say ok "$root/gh" "gh $gh_pin installed for the agent, old versions removed"
+ug_say ok "gh" "$gh_pin installed, old versions removed"
 
 rendered_dir=$(mktemp -d)
 cleanup+=("$rendered_dir")
@@ -183,24 +186,25 @@ render() {
 
 install -d -m 711 -o root -g wheel "$root/logs"
 
+ug_step "agent login"
 gh_app_dir=$root/github-app
 install -d -m 500 -o "$agent_user" -g staff "$gh_app_dir"
 ug_ensure_owner_mode "$gh_app_dir" "$agent_user:staff" 0500 ||
-  ug_die ug-agent-setup "cannot make $gh_app_dir owned by $agent_user mode 0500"
+  ug_die ug-agent-setup "cannot make $gh_app_dir $agent_user mode 0500"
 for name in github-app.json github-app.pem; do
   if [[ -e $data/$name || -L $data/$name ]]; then
     [[ -f $data/$name && ! -L $data/$name && $(stat -f '%l %Su' "$data/$name") == "1 $owner" ]] ||
-      ug_die ug-agent-setup "$data/$name is not a plain file of $owner with one link; write it again as a plain file"
+      ug_die ug-agent-setup "$data/$name must be a plain file of $owner with one link; write it again"
     install -m 400 -o "$agent_user" -g staff "$data/$name" "$gh_app_dir/$name"
     rm -f "$data/$name"
-    ug_say changed "github app" "moved $name from $data into $gh_app_dir, which only $agent_user can read"
+    ug_say changed "github app" "moved $name into $gh_app_dir"
   elif [[ -e $gh_app_dir/$name ]]; then
     ug_ensure_owner_mode "$gh_app_dir/$name" "$agent_user:staff" 0400 ||
-      ug_die ug-agent-setup "cannot make $gh_app_dir/$name owned by $agent_user mode 0400"
+      ug_die ug-agent-setup "cannot make $gh_app_dir/$name $agent_user mode 0400"
   fi
 done
 if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; then
-  ug_say ok "github app" "no app key in $gh_app_dir yet; put the private key of the GitHub App in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
+  ug_say warn "github app" "no key yet; put the app key in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
 fi
 
 if [[ ! -f $root/ssh_host_ed25519_key ]]; then
@@ -209,7 +213,7 @@ fi
 chown root:wheel "$root/ssh_host_ed25519_key" "$root/ssh_host_ed25519_key.pub"
 chmod 600 "$root/ssh_host_ed25519_key"
 chmod 644 "$root/ssh_host_ed25519_key.pub"
-ug_say ok "agent sshd host key" "$root/ssh_host_ed25519_key"
+ug_say ok "sshd host key" "$root/ssh_host_ed25519_key"
 
 deny=/etc/ssh/sshd_config.d/010-underground-deny-ugagent.conf
 deny_tmp=$(mktemp)
@@ -217,18 +221,19 @@ cleanup+=("$deny_tmp")
 printf 'DenyUsers %s\n' "$agent_user" >"$deny_tmp"
 install -m 444 -o root -g wheel "$deny_tmp" "$deny"
 ug_sshd_denies_agent /etc/ssh/sshd_config "$root/ssh_host_ed25519_key" ||
-  ug_die ug-agent-setup "the system sshd does not deny $agent_user with $deny in place; keep Remote Login off"
-ug_say ok "system sshd" "$deny denies $agent_user"
+  ug_die ug-agent-setup "system sshd does not deny $agent_user despite $deny; keep Remote Login off"
+ug_say ok "system sshd" "denies $agent_user"
 
-[[ -d $data ]] || ug_die ug-agent-setup "$data does not exist; run host/bin/ug-setup first"
+[[ -d $data ]] || ug_die ug-agent-setup "$data is missing; run host/bin/ug-setup first"
 install -d -m 700 -o "$owner" -g staff "$key_dir"
 if [[ ! -f $owner_key ]]; then
   ssh-keygen -q -t ed25519 -N '' -C ug-agent -f "$owner_key"
 fi
 chown "$owner" "$owner_key" "$owner_key.pub"
 chmod 600 "$owner_key"
-ug_say ok "owner key for the agent login" "$owner_key"
+ug_say ok "owner key" "$owner_key"
 
+ug_step "agent code"
 engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 [[ $engine =~ $ip_port ]] || ug_die ug-agent-setup "$data/addresses needs an engine=<ip>:<port> line"
 
@@ -237,7 +242,7 @@ for name in agent-session agent-start sshd_config agent-home-tar agent-unpack ag
 done
 render "host/agent/gh-app-token"
 render "host/agent/gh" -e "s|@GH@|$gh_bin|g"
-pfctl -n -f "$rendered_dir/agent-pf.conf" >/dev/null 2>&1 || ug_die ug-agent-setup "pfctl rejects host/agent/agent-pf.conf; the installed code is unchanged"
+pfctl -n -f "$rendered_dir/agent-pf.conf" >/dev/null 2>&1 || ug_die ug-agent-setup "pfctl rejects host/agent/agent-pf.conf; installed code unchanged"
 rm -rf "$code.new" "$code.old"
 install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/usage-broker" "$code.new/authorized_keys"
 ln -s "$omp_bin" "$code.new/bin/omp"
@@ -255,7 +260,7 @@ chmod 444 "$code.new/authorized_keys/$agent_user"
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
-ug_say ok "$code" "built fresh from $src and swapped in: facts, pf.conf, pf-load, agent-session, agent-start, sshd_config, ug-notices.ts, authorized_keys, bin/ (omp, gh, gh-app-token, agent-home-tar, agent-unpack), usage-broker/"
+ug_say ok "agent code" "rebuilt in $code"
 
 app_repos=$data/app-repos
 app_tmp=$(mktemp "$data/.app-repos.XXXXXX") || ug_die ug-agent-setup "cannot make a temp file for $app_repos"
@@ -265,51 +270,56 @@ if app_list=$( (cd / && ug_as "$agent_user" "$code/bin/gh" api installation/repo
   chown "$owner:staff" "$app_tmp"
   chmod 600 "$app_tmp"
   mv -f "$app_tmp" "$app_repos"
-  ug_say ok "app repos" "the repos the app may write to are listed in $app_repos, which setup checks the rule on main of"
+  ug_say ok "app repos" "listed in $app_repos"
 else
-  ug_say ok "app repos" "$app_repos keeps what setup listed last time; the app cannot list its repos now, so $gh_app_dir holds no key or GitHub does not answer"
+  ug_say warn "app repos" "cannot list them (no app key, or GitHub does not answer); kept $app_repos"
 fi
 
 host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
 printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
 install -m 600 -o "$owner" -g staff "$known_hosts.tmp" "$known_hosts"
 rm -f "$known_hosts.tmp"
-ug_say ok "known_hosts for 127.0.0.1:$agent_port" "$known_hosts"
+ug_say ok "known_hosts" "127.0.0.1:$agent_port in $known_hosts"
 
+ug_step "gateway"
 ug_as "$auth_user" install -d -m 700 "$auth_home/.omp"
 if ! ug_as "$auth_user" /bin/test -s "$auth_home/.omp/auth-gateway.token"; then
   openssl rand -hex 32 | ug_write_as "$auth_user" "$auth_home/.omp/auth-gateway.token"
-  ug_say changed "gateway bearer" "new, the .omp/auth-gateway.token of $auth_user"
+  ug_say changed "gateway bearer" "new token for $auth_user"
 fi
 gateway_token=$(ug_read_as "$auth_user" "$auth_home/.omp/auth-gateway.token" 2>/dev/null | tr -d '[:space:]') || gateway_token=""
-[[ $gateway_token =~ ^[A-Za-z0-9._~+=-]{12,}$ ]] || ug_die ug-agent-setup "the gateway bearer of $auth_user (.omp/auth-gateway.token in its home) is missing or holds characters a bearer may not have"
+[[ $gateway_token =~ ^[A-Za-z0-9._~+=-]{12,}$ ]] || ug_die ug-agent-setup "$auth_home/.omp/auth-gateway.token is missing or holds invalid characters"
 token_tmp=$(mktemp "$root/.gateway-token.XXXXXX")
 cleanup+=("$token_tmp")
 printf '%s\n' "$gateway_token" >"$token_tmp"
 chown "$agent_user:staff" "$token_tmp"
 chmod 400 "$token_tmp"
 mv -f "$token_tmp" "$root/gateway-token"
-ug_say ok "gateway bearer for the agent" "$root/gateway-token, owned by $agent_user mode 0400, which omp sends to the gateway"
+ug_say ok "agent bearer" "$root/gateway-token, $agent_user mode 0400"
 
-/usr/sbin/sshd -t -f "$code/sshd_config" || ug_die ug-agent-setup "sshd rejects $code/sshd_config; nothing was loaded"
+ug_step "daemons"
+/usr/sbin/sshd -t -f "$code/sshd_config" || ug_die ug-agent-setup "sshd rejects $code/sshd_config; nothing loaded"
 
 # shellcheck disable=SC2154
 start_services() {
-  local label name scope user template health log rendered out file want key logline
-  while IFS='|' read -r label name scope user template health log; do
+  local label name scope user template health log watch rendered out file want key logline kind
+  while IFS='|' read -r label name scope user template health log watch; do
     render "$template" -e "s|@OMP@|$omp_bin|g" -e "s|@ENGINE@|$engine|g"
     rendered=$rendered_dir/${template##*/}
-    want=$(ug_service_login "$user") || ug_die ug-agent-setup "the service table gives $label the user $user, which is not root or a key of host/facts"
+    want=$(ug_service_login "$user") || ug_die ug-agent-setup "service table gives $label user $user, not root or a key of host/facts"
     for key in StandardOutPath StandardErrorPath; do
       file=$(plutil -extract "$key" raw -o - "$rendered" 2>/dev/null) || continue
       [[ -e $file ]] || install -m 600 -o "$want" /dev/null "$file"
     done
-    ug_service_probe daemon "$label" "$health" || ug_die ug-agent-setup "setup cannot check $label; nothing changed for it"
+    ug_service_probe daemon "$label" "$health" || ug_die ug-agent-setup "cannot check $label; nothing changed for it"
     logline=""
     [[ -z $log ]] || logline="; read $(ug_service_expand "$log")"
-    out=$(ug_ensure_service system "$label" "$rendered" "/Library/LaunchDaemons/$label.plist" "${ug_probe[@]}") ||
+    watch=$(ug_service_expand "$watch") || ug_die ug-agent-setup "cannot expand the code paths of $label"
+    out=$(ug_ensure_service system "$label" "$rendered" "/Library/LaunchDaemons/$label.plist" "$watch" "${ug_probe[@]}") ||
       ug_die ug-agent-setup "$label: $out; check it with: $ug_probe_hint$logline"
-    ug_say changed "$ug_probe_subject" "$out"
+    kind=changed
+    [[ $out != unchanged* ]] || kind=same
+    ug_say "$kind" "$name" "$out"
   done < <(ug_services daemon)
 }
 
@@ -323,15 +333,16 @@ retire_daemons() {
     grep -qxF "$label" <<<"$keep" && continue
     err=$(ug_stop_service "system/$label") || ug_die ug-agent-setup "$err"
     rm -f "$plist"
-    ug_say changed "service $label" "booted out and deleted; this version of underground does not run it"
+    ug_say changed "service $label" "removed; no longer used"
   done
 }
 
-walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall is open: ${walls//$'\n'/; }. A user that reads what the agent makes must hold only what its job needs; no service was loaded"
-ug_say ok "walls between users" "$agent_user and $auth_user cannot read your home or each other's"
+walls=$(ug_user_walls "$owner_home") || ug_die ug-agent-setup "a wall between users is open: ${walls//$'\n'/; }; no service loaded"
+ug_say ok "walls" "$agent_user and $auth_user cannot read your home or each other's"
 retire_daemons
 start_services
 
+ug_step "launcher"
 agent_dir=$data/agent
 install -d -m 700 -o "$owner" -g staff "$agent_dir" "$agent_dir/bin" "$agent_dir/lib"
 [[ -d $bin_dir ]] || install -d -m 755 -o "$owner" -g staff "$bin_dir"
@@ -341,17 +352,17 @@ install -m 444 -o "$owner" -g staff "$src/host/lib/services.bash" "$agent_dir/li
 install -m 444 -o "$owner" -g staff "$src/host/lib/sources.bash" "$agent_dir/lib/sources.bash"
 install -m 444 -o "$owner" -g staff "$src/host/facts" "$agent_dir/facts"
 install -m 444 -o "$owner" -g staff "$src/host/services" "$agent_dir/services"
-[[ ! -e $bin_dir/omp || -L $bin_dir/omp ]] || ug_die ug-agent-setup "$bin_dir/omp is a file, not setup's link; move it away, then run setup again"
+[[ ! -e $bin_dir/omp || -L $bin_dir/omp ]] || ug_die ug-agent-setup "$bin_dir/omp is a file, not setup's link; move it away and run setup again"
 ln -sfn "$agent_dir/bin/ug-agent" "$bin_dir/omp"
 chown -h "$owner" "$bin_dir/omp"
-ug_say ok "omp on PATH" "$bin_dir/omp, the agent's launcher"
+ug_say ok "omp on PATH" "$bin_dir/omp"
 
 sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
 cleanup+=("$sudoers_tmp")
 printf '%s ALL=(%s) NOPASSWD: %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" >"$sudoers_tmp"
-visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "the sudoers rules for the agent helpers do not check; nothing was installed"
+visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "visudo rejects the sudoers rules for the agent helpers; nothing installed"
 install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
-ug_say ok sudoers "$code/bin/agent-home-tar and $code/bin/agent-unpack, run as $agent_user, and sudo for $owner to run them (/etc/sudoers.d/underground)"
+ug_say ok "sudoers" "$owner may run the agent helpers as $agent_user"
 
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
@@ -359,11 +370,12 @@ for item in "$root"/* "$root"/.[!.]*; do
     omp | gh | code | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
     *)
       rm -rf "$item"
-      ug_say changed "$item" "deleted; this version of underground does not install it"
+      ug_say changed "${item##*/}" "deleted from $root; no longer used"
       ;;
   esac
 done
 
+ug_step "checks"
 gateway_port=$(ug_fact gateway_port)
 usage_broker_port=$(ug_fact usage_broker_port)
 
@@ -376,24 +388,24 @@ agent_http() {
 models_url=http://127.0.0.1:${gateway_port}/v1/models
 models_noauth=$(agent_http "$models_url")
 [[ $models_noauth == 401 ]] ||
-  ug_die ug-agent-setup "$models_url answered $models_noauth with no bearer; it must answer 401, or whatever reaches port $gateway_port can call the models; setup stops here"
+  ug_die ug-agent-setup "$models_url answered $models_noauth without a bearer, not 401; anything on port $gateway_port could call the models"
 models=$( (cd / && printf 'header = "Authorization: Bearer %s"\n' "$(tr -d '[:space:]' <"$root/gateway-token")" |
   ug_as "$agent_user" curl -K - -sS -w $'\n%{http_code}' --max-time 10 "$models_url" 2>/dev/null) ) || true
 models_code=${models##*$'\n'}
 models_list=${models%$'\n'*}
 [[ -n $models_code ]] || models_code="did not answer"
 [[ $models_code == 200 ]] ||
-  ug_die ug-agent-setup "$models_url answered $models_code with the bearer of $root/gateway-token, so the agent cannot call the gateway; setup stops here"
+  ug_die ug-agent-setup "$models_url answered $models_code with the bearer in $root/gateway-token; the agent cannot call the gateway"
 [[ $models_list == *'"id":'* ]] ||
-  ug_die ug-agent-setup "$models_url answered 200 with an empty model list, so the agent has no model to call; setup stops here"
-ug_say ok "gateway auth" "$models_url: 401 without a bearer, 200 with the bearer of $root/gateway-token, which lists at least one model"
+  ug_die ug-agent-setup "$models_url lists no model; the agent has nothing to call"
+ug_say ok "gateway auth" "401 without a bearer, 200 with it, models listed"
 
 usage_url=http://127.0.0.1:${usage_broker_port}/v1/usage
 usage_code=$(agent_http "$usage_url")
 if [[ $usage_code == 200 ]]; then
-  ug_say ok "usage broker" "$usage_url: 200"
+  ug_say ok "usage broker" "answers 200"
 else
-  ug_say ok "usage broker" "warning: $usage_url answered $usage_code; /usage needs each provider's usage endpoint, so setup continues"
+  ug_say warn "usage broker" "$usage_url answered $usage_code; setup continues"
 fi
 
 model_start=$(date +%s)
@@ -420,7 +432,7 @@ model_cut=""
 model_note=${model_out//$'\n'/ }
 model_note=${model_note:0:200}
 if [[ $model_rc -eq 0 ]]; then
-  ug_say ok "model call" "$code/agent-start answered in ${model_elapsed}s: ${model_note:-no output}"
+  ug_say ok "model call" "answered in ${model_elapsed}s: ${model_note:-no output}"
 else
-  ug_say ok "model call" "warning: $code/agent-start exited $model_rc after ${model_elapsed}s$model_cut: ${model_note:-no output}; setup continues because the gateway and the usage broker answered"
+  ug_say warn "model call" "$code/agent-start exited $model_rc after ${model_elapsed}s$model_cut: ${model_note:-no output}; setup continues"
 fi
