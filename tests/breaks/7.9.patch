@@ -1,8 +1,8 @@
 diff --git a/host/agent/agent-start b/host/agent/agent-start
-index a86b896..d098815 100755
+index 079781a..962143c 100755
 --- a/host/agent/agent-start
 +++ b/host/agent/agent-start
-@@ -143,7 +143,7 @@ sweep_repo() {
+@@ -138,7 +138,7 @@ sweep_repo() {
    done < <(git for-each-ref --format='%(refname:lstrip=2) %(objectname) %(worktreepath)' refs/heads)
  
    while read -r b tip; do
