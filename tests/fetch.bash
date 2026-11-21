@@ -64,8 +64,7 @@ fx_has_ref() {
   fx_git --git-dir="$1" show-ref --verify --quiet "$2"
 }
 
-# A commit whose tree holds one file named $1, so its content is not on origin/main.
-fx_side_commit() {
+fx_unique_commit() {
   local name=$1 parent=${2:-HEAD} blob tree
   blob=$(printf '%s\n' "$name" | fx_git -C "$UG_TMPDIR/seed" hash-object -w --stdin) || fail "cannot store the blob $name"
   tree=$(printf '100644 blob %s\t%s\n' "$blob" "$name" | fx_git -C "$UG_TMPDIR/seed" mktree) || fail "cannot make the tree $name"
@@ -221,9 +220,9 @@ t_7_7() {
 t_7_8() {
   local closed early open_head
   fetch_fixture
-  closed=$(fx_side_commit closed)
-  early=$(fx_side_commit early)
-  open_head=$(fx_side_commit open-head "$early")
+  closed=$(fx_unique_commit closed)
+  early=$(fx_unique_commit early)
+  open_head=$(fx_unique_commit open-head "$early")
   fx_git -C "$UG_TMPDIR/seed" push -q origin "$closed:refs/heads/done" "$closed:refs/pull/7/head" "$early:refs/heads/part" "$open_head:refs/heads/live" "$open_head:refs/pull/8/head" ||
     fail 'cannot push the pull request refs'
   printf '8 live\n' >"$UG_TMPDIR/open-prs"
