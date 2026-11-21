@@ -32,25 +32,19 @@ start_omp() {
 }
 
 sync_repo() {
-  local clone=$1 base
+  local clone=$1
   cd "$clone" || return 0
   printf '%s %s\n' "$$" "$(date +%s)" >.git/ug-fetch.pid
-  /usr/bin/lockf -k -t 0 .git/ug-sync.lock git fetch --quiet --no-tags origin
+  /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c '
+    git fetch --quiet --no-tags origin || exit 1
+    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
+    git reset -q --hard "$base"
+  '
   case $? in
-    0) ;;
-    75)
-      printf 'skipped: another fetch holds the lock\n'
-      return 0
-      ;;
-    *)
-      printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status
-      return 0
-      ;;
+    0) printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
+    75) printf 'skipped: another fetch holds the lock\n' ;;
+    *) printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
   esac
-  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  [[ -n $base ]] || { printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status; return 0; }
-  git update-ref --no-deref HEAD "$base"
-  printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status
 }
 
 sync_report() {

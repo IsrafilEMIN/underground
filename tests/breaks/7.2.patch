@@ -1,12 +1,13 @@
 diff --git a/host/agent/agent-start b/host/agent/agent-start
-index 8b92d0c..bdf42fa 100755
+index ae4de7e..bc8bd95 100755
 --- a/host/agent/agent-start
 +++ b/host/agent/agent-start
-@@ -44,6 +44,7 @@ sync_repo() {
-       ;;
-     *)
-       printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status
-+      git update-ref --no-deref HEAD "$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"
-       return 0
-       ;;
+@@ -43,7 +43,7 @@ sync_repo() {
+   case $? in
+     0) printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
+     75) printf 'skipped: another fetch holds the lock\n' ;;
+-    *) printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
++    *) printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status; git update-ref --no-deref HEAD "$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)" ;;
    esac
+ }
+ 
