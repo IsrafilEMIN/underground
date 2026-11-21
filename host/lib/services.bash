@@ -3,11 +3,11 @@
 ug_services_file=${BASH_SOURCE[0]%/*}/../services
 
 ug_services() {
-  local want=${1:-} label name scope user template health log
-  while IFS='|' read -r label name scope user template health log || [[ -n $label ]]; do
+  local want=${1:-} label name scope user template health log watch
+  while IFS='|' read -r label name scope user template health log watch || [[ -n $label ]]; do
     [[ -n $label && $label != \#* ]] || continue
     [[ -z $want || $scope == "$want" ]] || continue
-    printf '%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log"
+    printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$label" "$name" "$scope" "$user" "$template" "$health" "$log" "$watch"
   done <"$ug_services_file"
 }
 
@@ -20,7 +20,6 @@ ug_service_probe() {
   domain=system
   [[ $scope == daemon ]] || domain=gui/$UID
   ug_probe=()
-  ug_probe_subject="service $label"
   ug_probe_hint="sudo launchctl print $domain/$label"
   [[ $scope == daemon ]] || ug_probe_hint="launchctl print $domain/$label"
   case $scope:$kind in
@@ -30,7 +29,6 @@ ug_service_probe() {
     daemon:pf)
       agent=$(ug_fact agent_user) || return 1
       ug_probe=(ug_pf_refuses_listener "$(id -u "$agent")" "$target")
-      ug_probe_subject="firewall: $agent cannot be the listener on port $target"
       ug_probe_hint="sudo pfctl -a com.apple/underground -sr"
       ;;
     *) printf 'the service table gives %s the health kind %s, which a job of scope %s cannot use\n' "$label" "$kind" "$scope"; return 1 ;;
@@ -99,9 +97,26 @@ ug_render() {
   [[ -z $left ]] || { printf '%s has an unknown placeholder %s\n' "$shown" "$left"; return 1; }
 }
 
+ug_code_sum() {
+  local paths path
+  read -r -a paths <<<"$1"
+  for path in "${paths[@]}"; do
+    [[ -e $path ]] || return 1
+  done
+  find "${paths[@]}" -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d ' ' -f 1
+}
+
 ug_ensure_service() {
-  local domain=$1 label=$2 rendered=$3 plist=$4 err i
-  shift 4
+  local domain=$1 label=$2 rendered=$3 plist=$4 watch=$5 sum err i
+  shift 5
+  if [[ -n $watch ]]; then
+    sum=$(ug_code_sum "$watch") || { printf 'cannot read %s, which %s runs\n' "$watch" "$label"; return 1; }
+    printf '<!-- code sha256 %s -->\n' "$sum" >>"$rendered"
+  fi
+  if cmp -s "$rendered" "$plist" && launchctl print "$domain/$label" >/dev/null 2>&1 && "$@" >/dev/null 2>&1; then
+    printf 'unchanged, healthy\n'
+    return 0
+  fi
   install -m 644 "$rendered" "$plist" || { printf 'cannot install %s\n' "$plist"; return 1; }
   ug_stop_service "$domain/$label" || return 1
   for (( i = 0; i < 5; i++ )); do
@@ -110,7 +125,7 @@ ug_ensure_service() {
   done
   (( i < 5 )) || { printf 'launchctl bootstrap of %s failed: %s\n' "$label" "$err"; return 1; }
   ug_wait 60 "$@" || { printf '%s does not answer 30 s after it loaded\n' "$label"; return 1; }
-  printf 'restarted, answers\n'
+  printf 'restarted, healthy\n'
 }
 
 ug_pf_refuses_listener() {

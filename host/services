@@ -1,6 +1,6 @@
-com.underground.backup|backup|agent|owner|host/launchd/com.underground.backup.plist|launchd|@DATA@/backup/backup.log
-com.underground.auth-broker|auth broker|daemon|auth_user|host/agent/com.underground.auth-broker.plist|http http://127.0.0.1:@AUTH_BROKER_PORT@/v1/healthz|@ROOT@/logs/auth-broker.log
-com.underground.auth-gateway|auth gateway|daemon|auth_user|host/agent/com.underground.auth-gateway.plist|http http://127.0.0.1:@GATEWAY_PORT@/healthz|@ROOT@/logs/auth-gateway.log
-com.underground.usage-broker|usage broker|daemon|auth_user|host/agent/com.underground.usage-broker.plist|http http://127.0.0.1:@USAGE_BROKER_PORT@/v1/healthz|@ROOT@/logs/usage-broker.log
-com.underground.agent-sshd|agent sshd|daemon|root|host/agent/com.underground.agent-sshd.plist|port 127.0.0.1:@AGENT_SSHD_PORT@|
-com.underground.agent-pf|agent pf|daemon|root|host/agent/com.underground.agent-pf.plist|pf @AUTH_BROKER_PORT@|
+com.underground.backup|backup|agent|owner|host/launchd/com.underground.backup.plist|launchd|@DATA@/backup/backup.log|
+com.underground.auth-broker|auth broker|daemon|auth_user|host/agent/com.underground.auth-broker.plist|http http://127.0.0.1:@AUTH_BROKER_PORT@/v1/healthz|@ROOT@/logs/auth-broker.log|
+com.underground.auth-gateway|auth gateway|daemon|auth_user|host/agent/com.underground.auth-gateway.plist|http http://127.0.0.1:@GATEWAY_PORT@/healthz|@ROOT@/logs/auth-gateway.log|
+com.underground.usage-broker|usage broker|daemon|auth_user|host/agent/com.underground.usage-broker.plist|http http://127.0.0.1:@USAGE_BROKER_PORT@/v1/healthz|@ROOT@/logs/usage-broker.log|@ROOT@/code/usage-broker @ROOT@/code/facts
+com.underground.agent-sshd|agent sshd|daemon|root|host/agent/com.underground.agent-sshd.plist|port 127.0.0.1:@AGENT_SSHD_PORT@||@ROOT@/code/sshd_config @ROOT@/ssh_host_ed25519_key.pub
+com.underground.agent-pf|agent pf|daemon|root|host/agent/com.underground.agent-pf.plist|pf @AUTH_BROKER_PORT@||@ROOT@/code/pf-load @ROOT@/code/pf.conf

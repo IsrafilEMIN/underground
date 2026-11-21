@@ -25,9 +25,9 @@ ug_pull_main() {
   "${g[@]}" merge --quiet --ff-only origin/main || { printf '%s: main cannot fast-forward to origin/main; setup does not merge or rebase. Nothing changed.\n' "$tool" >&2; return 1; }
   after=$("${g[@]}" rev-parse HEAD)
   if [[ $before == "$after" ]]; then
-    ug_say same checkout "main is at origin/main ${after:0:7}"
+    ug_say same checkout "main at origin/main ${after:0:7}"
   else
-    ug_say changed checkout "pulled main from ${before:0:7} to ${after:0:7}"
+    ug_say changed checkout "pulled main ${before:0:7} → ${after:0:7}"
   fi
 }
 
@@ -90,7 +90,7 @@ ug_check_main_rule() {
 
   ug_check_rulesets "$repo" "$open" || return 1
   ug_check_required_tests "$repo" "$open" || return 1
-  ug_say same "main rule" "GitHub merges to main of $repo only with the approval of @$login and a green tests check (ruleset $ug_ruleset_id)"
+  ug_say same "main rule" "$repo needs @$login approval and green tests (ruleset $ug_ruleset_id)"
 }
 
 ug_check_required_tests() {
