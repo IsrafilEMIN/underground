@@ -1,8 +1,8 @@
-diff --git a/host/lib/ug.bash b/host/lib/ug.bash
-index 2a90aeb..8d4b058 100644
---- a/host/lib/ug.bash
-+++ b/host/lib/ug.bash
-@@ -279,7 +279,7 @@ ug_read_sources() {
+diff --git a/host/lib/sources.bash b/host/lib/sources.bash
+index 44089d4..23cc702 100644
+--- a/host/lib/sources.bash
++++ b/host/lib/sources.bash
+@@ -27,7 +27,7 @@ ug_read_sources() {
      [[ $target =~ $target_re ]] ||
        { ug_err "$tool" "in $file: target $target is not a plain relative path"; return 1; }
      case /$target/ in

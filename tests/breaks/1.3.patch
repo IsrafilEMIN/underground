@@ -1,8 +1,8 @@
-diff --git a/host/lib/ug.bash b/host/lib/ug.bash
-index 2a90aeb..2407a0b 100644
---- a/host/lib/ug.bash
-+++ b/host/lib/ug.bash
-@@ -271,7 +271,7 @@ ug_read_sources() {
+diff --git a/host/lib/sources.bash b/host/lib/sources.bash
+index 44089d4..63c3130 100644
+--- a/host/lib/sources.bash
++++ b/host/lib/sources.bash
+@@ -19,7 +19,7 @@ ug_read_sources() {
      [[ -n $path ]] || continue
      [[ $path != plugin ]] ||
        { ug_err "$tool" "in $file: \"$line\": plugins are not sources; they come from omp's own github marketplace"; return 1; }

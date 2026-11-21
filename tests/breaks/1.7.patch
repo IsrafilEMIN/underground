@@ -1,8 +1,8 @@
-diff --git a/host/lib/ug.bash b/host/lib/ug.bash
-index 2a90aeb..4583479 100644
---- a/host/lib/ug.bash
-+++ b/host/lib/ug.bash
-@@ -262,7 +262,7 @@ ug_expand_home() {
+diff --git a/host/lib/sources.bash b/host/lib/sources.bash
+index 44089d4..0892ef4 100644
+--- a/host/lib/sources.bash
++++ b/host/lib/sources.bash
+@@ -10,7 +10,7 @@ ug_expand_home() {
  
  ug_read_sources() {
    local file=$1 home=$2 tool=$3

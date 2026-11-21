@@ -9,6 +9,70 @@ fi
 src=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 # shellcheck source=host/lib/ug.bash disable=SC1091
 source "$src/host/lib/ug.bash"
+# shellcheck source=host/lib/downloads.bash disable=SC1091
+source "$src/host/lib/downloads.bash"
+# shellcheck source=host/lib/services.bash disable=SC1091
+source "$src/host/lib/services.bash"
+# shellcheck source=host/lib/github.bash disable=SC1091
+source "$src/host/lib/github.bash"
+
+ug_as() {
+  local login=$1
+  shift
+  if [[ $login == "$(id -un)" ]]; then
+    "$@"
+  else
+    sudo -n -u "$login" -H "$@"
+  fi
+}
+
+ug_read_as() {
+  ug_as "$1" /bin/cat -- "$2"
+}
+
+# shellcheck disable=SC2016
+ug_write_as() {
+  ug_as "$1" /bin/sh -c 'umask 077 && /bin/cat >"$1" && /bin/chmod 600 "$1"' sh "$2"
+}
+
+ug_user_walls() {
+  local owner_home=$1 key keys login other target home open=0
+  local -a targets
+  keys=$(sed -n 's/^\([a-z_]*\)_user=.*/\1/p' "$ug_facts_file")
+  for key in $keys; do
+    login=$(ug_fact "${key}_user") || return 1
+    if ! ug_as "$login" /usr/bin/true >/dev/null 2>&1; then
+      printf '%s: sudo does not run as this user, so its walls are not proven\n' "$login"
+      open=1
+      continue
+    fi
+    targets=("$owner_home")
+    for other in $keys; do
+      if [[ $other != "$key" ]]; then
+        home=$(ug_fact "${other}_home") || return 1
+        targets+=("$home")
+      fi
+    done
+    for target in "${targets[@]}"; do
+      if ug_as "$login" /bin/ls "$target" >/dev/null 2>&1; then
+        printf '%s can list %s, a home that is not its own\n' "$login" "$target"
+        open=1
+      fi
+    done
+  done
+  return "$open"
+}
+
+ug_service_login() {
+  if [[ $1 == root ]]; then printf 'root\n'; else ug_fact "$1"; fi
+}
+
+ug_ensure_owner_mode() {
+  local file=$1 owner=$2 mode=$3
+  [[ $(stat -f '%Su:%Sg %Mp%Lp' "$file") != "$owner $mode" ]] || return 0
+  chown "$owner" "$file" && chmod "$mode" "$file" || return 1
+  [[ $(stat -f '%Su:%Sg %Mp%Lp' "$file") == "$owner $mode" ]]
+}
 
 trap 'ug_stopped $? $LINENO "$BASH_COMMAND" ug-agent-setup host/bin/ug-agent-setup ", so the agent user may be set up only in part" ", which repeats every step"' ERR
 
@@ -273,6 +337,8 @@ install -d -m 700 -o "$owner" -g staff "$agent_dir" "$agent_dir/bin" "$agent_dir
 [[ -d $bin_dir ]] || install -d -m 755 -o "$owner" -g staff "$bin_dir"
 install -m 555 -o "$owner" -g staff "$src/host/bin/ug-agent" "$agent_dir/bin/ug-agent"
 install -m 444 -o "$owner" -g staff "$src/host/lib/ug.bash" "$agent_dir/lib/ug.bash"
+install -m 444 -o "$owner" -g staff "$src/host/lib/services.bash" "$agent_dir/lib/services.bash"
+install -m 444 -o "$owner" -g staff "$src/host/lib/sources.bash" "$agent_dir/lib/sources.bash"
 install -m 444 -o "$owner" -g staff "$src/host/facts" "$agent_dir/facts"
 install -m 444 -o "$owner" -g staff "$src/host/services" "$agent_dir/services"
 [[ ! -e $bin_dir/omp || -L $bin_dir/omp ]] || ug_die ug-agent-setup "$bin_dir/omp is a file, not setup's link; move it away, then run setup again"
