@@ -113,3 +113,21 @@ t_7_3() {
   fx_start
   assert_eq "$fx_new" "$(fx_head)" 'the same clone without the lock held moves HEAD'
 }
+
+t_7_4() {
+  local mid
+  fetch_fixture
+  printf 'one\n' >"$UG_TMPDIR/seed/file"
+  fx_git -C "$UG_TMPDIR/seed" add file || fail 'cannot stage the file in the seed'
+  mid=$(fx_commit 'add file')
+  fx_git -C "$fx_clone" fetch -q origin || fail 'cannot fetch the file commit'
+  fx_git -C "$fx_clone" checkout -q --detach "$mid" || fail 'cannot detach the clone at the file commit'
+  fx_new=$(fx_commit third)
+  printf 'staged\n' >"$fx_clone/file"
+  fx_git -C "$fx_clone" add file || fail 'cannot stage the change in the clone'
+  printf 'live\n' >"$fx_clone/file"
+  [[ -n $(fx_git -C "$fx_clone" status --porcelain) ]] || fail 'the clone does not start dirty'
+  fx_start
+  assert_eq "$fx_new" "$(fx_head)" 'HEAD moves to the commit pushed to origin'
+  assert_eq '' "$(fx_git -C "$fx_clone" status --porcelain)" 'the index and files match the new HEAD'
+}

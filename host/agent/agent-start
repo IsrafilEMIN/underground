@@ -49,7 +49,7 @@ sync_repo() {
   esac
   base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
   [[ -n $base ]] || { printf 'failed %s\n' "$(date +%s)" >.git/ug-fetch.status; return 0; }
-  git update-ref --no-deref HEAD "$base"
+  git reset -q --hard "$base"
   printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status
 }
 
