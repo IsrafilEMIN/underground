@@ -1,12 +1,12 @@
 diff --git a/host/agent/agent-start b/host/agent/agent-start
-index ae4de7e..83cc58a 100755
+index a86b896..bc26c16 100755
 --- a/host/agent/agent-start
 +++ b/host/agent/agent-start
-@@ -38,7 +38,6 @@ sync_repo() {
-   /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c '
-     git fetch --quiet --no-tags origin || exit 1
+@@ -168,7 +168,6 @@ sync_repo() {
+   /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c "$(declare -f sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo)"'
+     git fetch --quiet --no-tags --prune origin || exit 1
      base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
--    git reset -q --hard "$base"
-   '
-   case $? in
-     0) printf 'ok %s\n' "$(date +%s)" >.git/ug-fetch.status ;;
+-    git reset -q --hard "$base" || exit 1
+     sweep_repo "$1" "$base"
+     exit 0
+   ' _ "$repo"

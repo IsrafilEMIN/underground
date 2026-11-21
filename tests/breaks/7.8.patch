@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+index a86b896..a4dd642 100755
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -58,7 +58,7 @@ sweep_commits_safe() {
+   git merge-base --is-ancestor "$tip" "$base" && return 0
+   sweep_pulls
+   while IFS= read -r n; do
+-    [[ $sweep_open_numbers == *" $n "* ]] || return 0
++    return 0
+   done < <(git for-each-ref --contains "$tip" --format='%(refname:lstrip=3)' refs/ug/pull)
+   mb=$(git merge-base "$base" "$tip") || return 1
+   while IFS= read -r -d '' p; do paths+=("$p"); done < <(git diff --name-only -z "$mb" "$tip")
