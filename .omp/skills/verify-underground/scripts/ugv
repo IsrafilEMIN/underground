@@ -1,0 +1,410 @@
+#!/bin/bash
+# ugv: build, drive and tear down a stand-in Underground host for verification.
+# It copies this worktree into /tmp/ugv-<run>, renders host/agent/* into a
+# scratch root exactly as host/bin/ug-agent-setup lays it out, and puts stubs
+# for the production boundaries (sudo, launchctl, ssh, nc, restic, omp, gh)
+# first on PATH. The real /Library/Underground, real launchd and the real
+# users are never touched. Run `ugv help` for usage.
+set -euo pipefail
+
+self=${BASH_SOURCE[0]}
+while [[ -L $self ]]; do
+  target=$(readlink "$self")
+  [[ $target == /* ]] || target=$(dirname "$self")/$target
+  self=$target
+done
+skill_dir=$(cd "$(dirname "$self")/.." && pwd -P)
+repo=${UGV_SRC:-$(cd "$skill_dir/../../.." && pwd -P)}
+tmp_root=$(cd "${UGV_TMP:-/tmp}" && pwd -P)
+evidence_root=${UGV_EVIDENCE:-$HOME/scratch/verify-underground}
+run_re='^[A-Za-z0-9._-]+$'
+
+die() {
+  printf 'ugv: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+usage:
+  ugv up [RUN]                         build a stand-in host; prints base and evidence dirs
+  ugv doctor RUN                       read-only check that RUN is worth driving
+  ugv owner RUN [opts] -- CMD...       run CMD as the owner (HOME=owner-home, stubs first on PATH)
+  ugv agent RUN [opts] -- CMD...       run CMD as the agent, as the agent sshd or launchd would
+  ugv look RUN LABEL -- CMD...         capture a read-only observation (cwd = base, plain env)
+  ugv repo RUN OWNER/NAME              make an owner checkout + agent clone with a local origin
+  ugv git RUN -- GIT-ARGS...           git with an isolated config and identity (cwd = base)
+  ugv fault RUN NAME RC|clear          make a stub exit RC (see the skill for NAME values)
+  ugv calls RUN [STUB]                 print stub call logs
+  ugv down RUN                         kill processes of RUN, remove its base, keep evidence
+
+opts for owner/agent:
+  --label L      name of the evidence step (default: the command name)
+  --cwd DIR      working dir (relative to base); default owner-home / agent-home
+  --env K=V      extra environment variable (repeatable)
+
+CMD paths: host/... resolves into base/src, code/... into base/root/code.
+EOF
+}
+
+need_run() {
+  [[ -n ${1:-} && $1 =~ $run_re ]] || die "RUN must match $run_re"
+  run=$1
+  base=$tmp_root/ugv-$run
+  evidence=$evidence_root/$run
+}
+
+need_base() {
+  [[ -f $base/meta/ready ]] || die "no stand-in at $base; run: ugv up $run"
+}
+
+q() { printf '%q' "$1"; }
+
+src_state() {
+  local head dirty
+  head=$(git -C "$repo" rev-parse HEAD 2>/dev/null) || head=unknown
+  dirty=$(git -C "$repo" status --porcelain --untracked-files=all -- host VERSIONS 2>/dev/null | shasum -a 256 | cut -c1-12)
+  printf '%s %s\n' "$head" "$dirty"
+}
+
+write_stub() {
+  local name=$1 body=$2
+  {
+    printf '#!/bin/bash\n'
+    printf 'base=%q\n' "$base"
+    printf 'name=%q\n' "$name"
+    cat "$skill_dir/scripts/stub-lib.bash"
+    printf '%s\n' "$body"
+  } >"$base/stubs/$name"
+  chmod 755 "$base/stubs/$name"
+}
+
+cmd_up() {
+  local run base evidence data root code home key pin f key_name want reqs
+  need_run "${1:-$(date +%Y%m%d-%H%M%S)-$$}"
+  [[ ! -e $base ]] || die "$base exists; pick another RUN or run: ugv down $run"
+  [[ $(uname -s) == Darwin ]] || die 'the stand-in needs macOS (lockf, stat -f, plutil)'
+  [[ -f $repo/host/facts && -f $repo/VERSIONS ]] || die "$repo is not an underground checkout"
+
+  mkdir -p "$base"/{meta,calls,faults,fixtures,stubs,origins,seeds} "$evidence/steps"
+  root=$base/root
+  code=$root/code
+  home=$base/agent-home
+  data=$base/owner-home/.local/share/underground
+
+  # 1. the code under test: this worktree, including uncommitted edits
+  /usr/bin/rsync -a --exclude .git --exclude .omp --exclude .DS_Store "$repo/" "$base/src/"
+  src_state >"$base/meta/src-state"
+  sed -i '' \
+    -e "s|^root=.*|root=$root|" \
+    -e "s|^agent_home=.*|agent_home=$home|" \
+    -e "s|^auth_home=.*|auth_home=$base/auth-home|" \
+    -e 's|_port=.*|_port=9|' \
+    "$base/src/host/facts"
+
+  # 2. stubs for the production boundaries
+  for f in sudo launchctl ssh nc restic omp gh gh-app-token; do
+    write_stub "$f" "$(cat "$skill_dir/scripts/stubs/$f")"
+  done
+
+  # 3. agent root, laid out like host/bin/ug-agent-setup:240-258
+  mkdir -p "$code/bin" "$code/usage-broker" "$code/authorized_keys" "$root/logs" "$base/meta/rendered"
+  printf 'verify-gateway-token\n' >"$root/gateway-token"
+  (
+    # shellcheck source=/dev/null
+    source "$base/src/host/lib/ug.bash"
+    # shellcheck source=/dev/null
+    source "$base/src/host/lib/services.bash"
+    for f in agent-session agent-start agent-env agent-dream sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
+      out=$(ug_render "$base/meta/rendered/$f" "$base/src/host/agent/$f" "host/agent/$f") || { printf '%s\n' "$out" >&2; exit 1; }
+    done
+  ) || die 'rendering host/agent templates failed'
+  ln -s "$base/stubs/omp" "$code/bin/omp"
+  install -m 555 "$base/stubs/gh" "$base/stubs/gh-app-token" "$code/bin/"
+  install -m 555 "$base/meta/rendered/agent-home-tar" "$base/meta/rendered/agent-unpack" "$base/src/host/agent/agent-check" "$code/bin/"
+  install -m 444 "$base/src"/host/usage-broker/*.ts "$code/usage-broker/"
+  install -m 444 "$base/src/host/facts" "$base/meta/rendered/sshd_config" "$code/"
+  install -m 444 "$base/src/host/agent/ug-notices.ts" "$base/src/host/agent/dream-prompt.md" "$base/meta/rendered/agent-env" "$code/"
+  install -m 444 "$base/src/host/requirements" "$code/requirements"
+  install -m 555 "$base/meta/rendered/agent-session" "$base/meta/rendered/agent-start" "$base/meta/rendered/agent-dream" "$code/"
+
+  # 4. owner home with the data dir host/bin/ug-setup would have written
+  mkdir -p "$data/agent-ssh" "$data/backup"
+  chmod 700 "$base/owner-home" "$data/agent-ssh"
+  key=$data/agent-ssh/id_ed25519
+  ssh-keygen -q -t ed25519 -N '' -C ugv-verify -f "$key"
+  printf '[127.0.0.1]:9 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHVndi12ZXJpZnktc3RhbmQtaW4taG9zdC1rZXk\n' >"$data/agent-ssh/known_hosts"
+  cut -d ' ' -f 1,2 "$key.pub" >"$code/authorized_keys/ugagent"
+  printf '# repo-path target (written by ugv up; empty means no sources)\n' >"$data/sources"
+  openssl rand -hex 16 >"$data/backup/password"
+  printf 'repo=sftp:verify@backup.invalid:/ugv-%s\n' "$run" >"$data/backup/config"
+  pin=$(sed -n 's/^restic=//p' "$base/src/VERSIONS")
+  mkdir -p "$data/restic/$pin"
+  ln -s "$base/stubs/restic" "$data/restic/$pin/restic"
+
+  # 5. agent home that meets host/requirements (verification scaffolding)
+  mkdir -p "$home/.omp/agent"
+  chmod 700 "$home"
+  # agent-start clones https://github.com/<slug>.git; keep every agent git call offline
+  printf '[url "%s/origins/"]\n\tinsteadOf = https://github.com/\n' "$base" >"$home/.gitconfig"
+  reqs=$base/src/host/requirements
+  while IFS= read -r f; do
+    mkdir -p "$(dirname "$home/$f")"
+    printf '# ugv scaffolding: stands in for the agent-config file %s\n' "$f" >"$home/$f"
+  done < <(sed -n 's/^file \([^:]*\):.*/\1/p' "$reqs")
+  {
+    printf '{'
+    sep=
+    while IFS='=' read -r key_name want; do
+      printf '%s"%s":{"value":"%s"}' "$sep" "$key_name" "$want"
+      sep=,
+    done < <(sed -n 's/^setting \([^=]*\)=\([^:]*\):.*/\1=\2/p' "$reqs")
+    printf '}\n'
+  } | /usr/bin/jq . >"$base/fixtures/omp-config.json"
+
+  printf '%s\n' "$run" >"$base/meta/ready"
+  printf 'ready: run=%s\n  base=%s\n  evidence=%s\n  src=%s (%s)\n' "$run" "$base" "$evidence" "$repo" "$(cat "$base/meta/src-state")"
+}
+
+cmd_doctor() {
+  local run base evidence problems=() pids now f
+  need_run "${1:-}"
+  [[ -d $base ]] || die "no stand-in at $base"
+  [[ -f $base/meta/ready ]] || problems+=("ugv up did not finish: $base/meta/ready is missing; run ugv down $run, then ugv up again")
+  [[ $(sed -n 's/^root=//p' "$base/src/host/facts" 2>/dev/null) == "$base/root" ]] ||
+    problems+=("src/host/facts does not point root at $base/root")
+  if grep -rl '/Library/Underground\|/Users/ugagent' "$base/root/code" >/dev/null 2>&1; then
+    problems+=("rendered code still names the real host: $(grep -rl '/Library/Underground\|/Users/ugagent' "$base/root/code" | tr '\n' ' ')")
+  fi
+  [[ $(readlink "$base/root/code/bin/omp" 2>/dev/null) == "$base/stubs/omp" ]] || problems+=("code/bin/omp is not the omp stub")
+  for f in sudo launchctl ssh nc restic omp gh; do
+    [[ -x $base/stubs/$f ]] || problems+=("stub $f is missing")
+  done
+  [[ -n $(find "$base/owner-home" -maxdepth 0 -perm 700 2>/dev/null) ]] || problems+=("owner-home is not mode 700")
+  for f in /usr/bin/lockf /usr/bin/jq /usr/bin/sqlite3 /usr/bin/tar /usr/bin/git /usr/bin/nc; do
+    [[ -x $f ]] || problems+=("$f is missing")
+  done
+  now=$(src_state)
+  [[ $now == "$(cat "$base/meta/src-state" 2>/dev/null)" ]] ||
+    problems+=("the worktree changed since ugv up (was $(cat "$base/meta/src-state" 2>/dev/null), now $now); run ugv down $run and ugv up to test the new code")
+  pids=$(run_pids)
+  printf 'run:       %s\nbase:      %s\nevidence:  %s\nsrc:       %s\nfaults:    %s\nprocesses: %s\n' \
+    "$run" "$base" "$evidence" "$(cat "$base/meta/src-state" 2>/dev/null)" \
+    "$(cd "$base/faults" && ls | tr '\n' ' ')" "${pids:-none}"
+  if ((${#problems[@]})); then
+    printf 'doctor: FAIL\n'
+    printf '  - %s\n' "${problems[@]}"
+    return 1
+  fi
+  printf 'doctor: ok\n'
+}
+
+run_pids() {
+  local snap
+  snap=$(/bin/ps -axo pid=,command=)
+  awk -v b="$base/" -v me=$$ 'index($0, b) && $1 != me { print $1 }' <<<"$snap" | tr '\n' ' ' | sed 's/ $//'
+}
+
+next_step() {
+  local label=$1 n
+  n=$(find "$evidence/steps" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+  step=$evidence/steps/$(printf '%02d' $((n + 1)))-${label//[^A-Za-z0-9._-]/_}
+  mkdir -p "$step"
+}
+
+calls_mark() {
+  local f
+  for f in "$base"/calls/*.log; do
+    [[ -f $f ]] || continue
+    printf '%s %s\n' "${f##*/}" "$(wc -l <"$f" | tr -d ' ')"
+  done >"$step/.calls-before"
+}
+
+calls_since() {
+  local f name before
+  mkdir -p "$step/calls"
+  for f in "$base"/calls/*.log; do
+    [[ -f $f ]] || continue
+    name=${f##*/}
+    before=$(awk -v n="$name" '$1 == n { print $2 }' "$step/.calls-before")
+    tail -n +$((${before:-0} + 1)) "$f" >"$step/calls/$name"
+    [[ -s $step/calls/$name ]] || rm -f "$step/calls/$name"
+  done
+  rmdir "$step/calls" 2>/dev/null || true
+  rm -f "$step/.calls-before"
+}
+
+run_captured() {
+  local rc=0
+  printf '%s\n' "$*" >"$step/command.txt"
+  calls_mark
+  "$@" >"$step/stdout.txt" 2>"$step/stderr.txt" || rc=$?
+  printf '%s\n' "$rc" >"$step/exit.txt"
+  calls_since
+  printf -- '--- step %s (exit %s)\n' "${step##*/}" "$rc"
+  printf -- '--- stdout\n'
+  cat "$step/stdout.txt"
+  printf -- '--- stderr\n'
+  cat "$step/stderr.txt"
+  if [[ -d $step/calls ]]; then
+    printf -- '--- stub calls\n'
+    (cd "$step/calls" && for f in *; do sed "s|^|${f%.log}: |" "$f"; done)
+  fi
+  return 0
+}
+
+cmd_as() {
+  local who=$1 run base evidence label= cwd= envs=() cmd step
+  shift
+  need_run "${1:-}"
+  shift
+  need_base
+  while (($#)); do
+    case $1 in
+      --label) label=$2; shift 2 ;;
+      --cwd) cwd=$2; shift 2 ;;
+      --env) envs+=("$2"); shift 2 ;;
+      --) shift; break ;;
+      *) die "unknown option $1; put the command after --" ;;
+    esac
+  done
+  (($#)) || die 'no command after --'
+  cmd=$1
+  shift
+  case $cmd in
+    host/*) cmd=$base/src/$cmd ;;
+    code/*) cmd=$base/root/$cmd ;;
+  esac
+  next_step "${label:-$who-${cmd##*/}}"
+  if [[ $who == owner ]]; then
+    cwd=$base/${cwd:-owner-home}
+    run_captured env -i HOME="$base/owner-home" USER=ugv-owner LOGNAME=ugv-owner SHELL=/bin/bash \
+      PATH="$base/stubs:/usr/bin:/bin:/usr/sbin:/sbin" TERM=dumb NO_COLOR=1 \
+      GIT_CEILING_DIRECTORIES="$tmp_root" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      ${envs[@]+"${envs[@]}"} /bin/bash -c 'cd "$1" && shift && exec "$@"' _ "$cwd" "$cmd" "$@"
+  else
+    cwd=$base/${cwd:-agent-home}
+    run_captured env -i HOME="$base/agent-home" USER=ugagent LOGNAME=ugagent SHELL=/bin/bash \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin TERM=dumb \
+      ${envs[@]+"${envs[@]}"} /bin/bash -c 'cd "$1" && shift && exec "$@"' _ "$cwd" "$cmd" "$@"
+  fi
+}
+
+cmd_look() {
+  local run base evidence label step
+  need_run "${1:-}"
+  label=${2:-}
+  [[ -n $label && ${3:-} == -- ]] || die 'usage: ugv look RUN LABEL -- CMD...'
+  shift 3
+  need_base
+  next_step "look-$label"
+  run_captured /bin/bash -c 'cd "$1" && shift && exec "$@"' _ "$base" "$@"
+}
+
+ugv_git() {
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 /usr/bin/git -c user.name=ugv -c user.email=ugv@example.invalid -c init.defaultBranch=main "$@"
+}
+
+cmd_git() {
+  local run base evidence
+  need_run "${1:-}"
+  [[ ${2:-} == -- ]] || die 'usage: ugv git RUN -- GIT-ARGS...'
+  shift 2
+  need_base
+  (cd "$base" && ugv_git "$@")
+}
+
+cmd_repo() {
+  local run base evidence slug name origin seed owner_co agent_co
+  need_run "${1:-}"
+  slug=${2:-}
+  [[ $slug =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die 'usage: ugv repo RUN OWNER/NAME'
+  need_base
+  name=${slug#*/}
+  origin=$base/origins/$slug.git
+  seed=$base/seeds/$slug
+  owner_co=$base/owner-home/code/$name
+  agent_co=$base/agent-home/work/$slug
+  [[ ! -e $origin ]] || die "$slug exists in $base/origins"
+  mkdir -p "$(dirname "$origin")" "$(dirname "$seed")" "$base/owner-home/code" "$(dirname "$agent_co")"
+  ugv_git init -q --bare -b main "$origin"
+  ugv_git init -q -b main "$seed"
+  printf '# %s\n\nseeded by ugv repo\n' "$slug" >"$seed/README.md"
+  ugv_git -C "$seed" add README.md
+  ugv_git -C "$seed" commit -q -m 'seed: first commit'
+  ugv_git -C "$seed" remote add origin "$origin"
+  ugv_git -C "$seed" push -q origin main
+  ugv_git clone -q "$origin" "$owner_co"
+  ugv_git -C "$owner_co" remote set-url origin "https://github.com/$slug.git"
+  ugv_git clone -q "$origin" "$agent_co"
+  ugv_git -C "$agent_co" checkout -q --detach origin/main
+  printf 'repo %s\n  origin (bare, local)  %s\n  seed (push here)      %s\n  owner checkout        %s  (origin url https://github.com/%s.git, never fetched)\n  agent clone           %s  (origin = the local bare repo)\n' \
+    "$slug" "$origin" "$seed" "$owner_co" "$slug" "$agent_co"
+}
+
+cmd_fault() {
+  local run base evidence name rc
+  need_run "${1:-}"
+  name=${2:-}
+  rc=${3:-}
+  [[ $name =~ ^[a-z-]+$ && ( $rc =~ ^[0-9]+$ || $rc == clear ) ]] || die 'usage: ugv fault RUN NAME RC|clear'
+  need_base
+  if [[ $rc == clear ]]; then
+    rm -f "$base/faults/$name"
+    printf 'fault %s cleared\n' "$name"
+  else
+    printf '%s\n' "$rc" >"$base/faults/$name"
+    printf 'fault %s: the stub exits %s\n' "$name" "$rc"
+  fi
+}
+
+cmd_calls() {
+  local run base evidence f
+  need_run "${1:-}"
+  need_base
+  for f in "$base"/calls/${2:-*}.log; do
+    [[ -f $f ]] || continue
+    sed "s|^|$(basename "$f" .log): |" "$f"
+  done
+}
+
+cmd_down() {
+  local run base evidence pids i
+  need_run "${1:-}"
+  [[ -d $base ]] || { printf 'nothing to remove at %s\nevidence: %s\n' "$base" "$evidence"; return 0; }
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    pids=$(run_pids)
+    [[ -n $pids ]] || break
+    if ((i == 1)); then printf 'waiting for processes of %s: %s\n' "$run" "$pids"; fi
+    if ((i == 6)); then
+      printf 'killing processes of %s: %s\n' "$run" "$pids"
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+    fi
+    sleep 1
+  done
+  pids=$(run_pids)
+  [[ -z $pids ]] || die "processes of $run survive: $pids; base kept at $base"
+  mkdir -p "$evidence/final"
+  [[ ! -d $base/calls ]] || cp -R "$base/calls" "$evidence/final/"
+  cp "$base/meta/src-state" "$evidence/final/" 2>/dev/null || true
+  # backup-repo and origins exist only after a backup or `ugv repo`; list what exists
+  (cd "$base" && find owner-home agent-home root/logs origins backup-repo -not -path '*/.git/*' 2>/dev/null | sort || true) >"$evidence/final/tree.txt"
+  rm -rf "$base"
+  printf 'removed %s\nevidence: %s\n' "$base" "$evidence"
+}
+
+case ${1:-help} in
+  up) shift; cmd_up "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  owner) shift; cmd_as owner "$@" ;;
+  agent) shift; cmd_as agent "$@" ;;
+  look) shift; cmd_look "$@" ;;
+  repo) shift; cmd_repo "$@" ;;
+  git) shift; cmd_git "$@" ;;
+  fault) shift; cmd_fault "$@" ;;
+  calls) shift; cmd_calls "$@" ;;
+  down) shift; cmd_down "$@" ;;
+  help | -h | --help) usage ;;
+  *) usage >&2; exit 64 ;;
+esac

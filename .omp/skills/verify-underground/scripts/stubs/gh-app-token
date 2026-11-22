@@ -1,0 +1,2 @@
+# gh-app-token: a fixed token; no GitHub App key is read.
+printf 'ugv-app-token\n'

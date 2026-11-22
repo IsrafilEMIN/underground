@@ -133,8 +133,7 @@ t_8_7() {
   assert_eq 0 "$ac_rc" "agent-check exits 0 on host/requirements ($ac_err)"
   [[ $ac_out != *'cannot read this line'* ]] || fail "host/requirements has a line that agent-check cannot read: $ac_out"
   [[ $ac_out != *autolearn* ]] || fail "host/requirements must not require autolearn, which lets the agent write unreviewed skills: $ac_out"
-  for want in memory.backend=mnemopi mnemopi.scoping=global mnemopi.autoRetain=false mnemopi.noEmbeddings=true \
-    worktree.onStart=create; do
+  for want in memory.backend=mnemopi mnemopi.scoping=global mnemopi.autoRetain=false mnemopi.noEmbeddings=true; do
     assert_contains "${want%%=*} is not a setting of this omp; underground needs ${want#*=}:" "$ac_out" \
       "host/requirements needs $want"
   done

@@ -1,0 +1,30 @@
+# omp: answers `config list --json` from $base/fixtures/omp-config.json and `config get` with
+# "(not set)" (fault: omp-config). A session or `-p` call records its environment, prints the
+# notices the ug-notices.ts extension would show, and for `-p` prints $base/fixtures/omp-answer.md
+# (fault: omp).
+if [[ ${1:-} == config ]]; then
+  fault omp-config
+  case ${2:-} in
+    list) cat "$base/fixtures/omp-config.json" ;;
+    get) printf '(not set)\n' ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+log_note "HOME=$HOME"
+log_note "UG_REPO=${UG_REPO-<unset>}"
+log_note "UG_NOTICES=$(printf '%q' "${UG_NOTICES-}")"
+log_note "UG_GATEWAY_TOKEN=${UG_GATEWAY_TOKEN:+set}"
+log_note "OMP_AUTH_BROKER_URL=${OMP_AUTH_BROKER_URL-<unset>}"
+fault omp
+prompt=
+for a in "$@"; do [[ $a != -p ]] || prompt=1; done
+if [[ -n $prompt ]]; then
+  [[ ! -f $base/fixtures/omp-answer.md ]] || cat "$base/fixtures/omp-answer.md"
+  exit 0
+fi
+printf 'omp-stub: session started in %s\n' "$PWD"
+while IFS= read -r line; do
+  [[ -z ${line//[[:space:]]/} ]] || printf 'omp-stub: warning notice: %s\n' "$line"
+done <<<"${UG_NOTICES-}"
+exit 0
