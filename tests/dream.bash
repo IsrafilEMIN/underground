@@ -68,16 +68,15 @@ dr_session() {
 
 dr_db() {
   dr_db_file=$UG_TMPDIR/mnemopi.db
-  local table cols='id TEXT PRIMARY KEY, content TEXT, source TEXT, timestamp TEXT, session_id TEXT, metadata_json TEXT, valid_until TEXT, consolidated_at TEXT, scope TEXT'
-  for table in working_memory episodic_memory; do
-    /usr/bin/sqlite3 "$dr_db_file" "CREATE TABLE $table ($cols)" || fail "cannot make the table $table"
-  done
+  local cols='id TEXT PRIMARY KEY, content TEXT, source TEXT, timestamp TEXT, session_id TEXT, metadata_json TEXT, valid_until TEXT, scope TEXT'
+  /usr/bin/sqlite3 "$dr_db_file" "CREATE TABLE working_memory ($cols, consolidated_at TEXT)" || fail 'cannot make the table working_memory'
+  /usr/bin/sqlite3 "$dr_db_file" "CREATE TABLE episodic_memory ($cols)" || fail 'cannot make the table episodic_memory'
   printf '%s\n' "$dr_db_file" >"$UG_TMPDIR/db-path"
 }
 
 dr_row() {
-  local table=$1 id=$2 content=$3 at=$4 consolidated=${5:-NULL}
-  /usr/bin/sqlite3 "$dr_db_file" "INSERT INTO $table (id, content, source, timestamp, session_id, metadata_json, consolidated_at, scope) VALUES ('$id', '$content', 'retain', '$at', 's0', '{\"context\":\"ctx $id\"}', $consolidated, 'global')" ||
+  local table=$1 id=$2 content=$3 at=$4
+  /usr/bin/sqlite3 "$dr_db_file" "INSERT INTO $table (id, content, source, timestamp, session_id, metadata_json, scope) VALUES ('$id', '$content', 'retain', '$at', 's0', '{\"context\":\"ctx $id\"}', 'global')" ||
     fail "cannot insert the row $id"
 }
 
@@ -166,7 +165,7 @@ t_9_3() {
   dr_age 172800 "$dr_sessions"/*.jsonl
   dr_db
   dr_row working_memory w-open 'open fact' 2020-01-01T00:00:00.000Z
-  dr_row episodic_memory e-done 'consolidated fact' 2020-01-01T00:00:00.000Z "'2020-01-02T00:00:00.000Z'"
+  dr_row episodic_memory e-old 'old episodic fact' 2020-01-01T00:00:00.000Z
   dr_answer $'# Dream\n\nSummary: ok\n'
   run_dream
   assert_eq 0 "$dr_rc" "agent-dream with an empty window exits 0 ($dr_out)"
@@ -201,7 +200,8 @@ t_9_5() {
   dr_db
   dr_row working_memory w-new 'new fact' "$(dr_iso "$(date +%s)")"
   dr_row working_memory w-open 'open fact' 2020-01-01T00:00:00.000Z
-  dr_row episodic_memory e-done 'consolidated fact' 2020-01-01T00:00:00.000Z "'2020-01-02T00:00:00.000Z'"
+  dr_row episodic_memory e-old 'old episodic fact' 2020-01-01T00:00:00.000Z
+  dr_row episodic_memory e-new 'new episodic fact' "$(dr_iso "$(date +%s)")"
 
   dr_answer $'# Dream x\n\nSummary: half done\n' 1
   run_dream
@@ -239,7 +239,8 @@ t_9_5() {
   assert_contains 'working_memory id w-new · new' "$digest" 'the digest holds the new row'
   assert_contains 'working_memory id w-open · open' "$digest" 'the digest holds the open row'
   assert_contains 'context ctx w-new' "$digest" 'the digest holds the row context'
-  [[ $digest != *'consolidated fact'* ]] || fail 'the digest holds an old consolidated row'
+  assert_contains 'episodic_memory id e-new · new' "$digest" 'the digest holds the new episodic row'
+  [[ $digest != *'old episodic fact'* ]] || fail 'the digest holds an old episodic row'
   assert_contains "Failure: omp exited 1" "$digest" 'the digest holds the earlier reports'
   [[ -f $dr_dreams/.mnemopi-before.db ]] || fail 'the db was not copied before the dream'
   assert_contains ".backup '$dr_dreams/.mnemopi-before.db'" "$(cat "$dr_calls/sqlite3")" 'the db copy uses sqlite3 .backup'

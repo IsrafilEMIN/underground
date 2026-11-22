@@ -140,9 +140,10 @@ if [[ -f $db ]]; then
   rm -f "$before_db"
   sqlite3 "$db" ".backup '$before_db'" || die "sqlite3 cannot back up $db to $before_db"
   row_columns="id, content, source, session_id, CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '\$.context') END AS context, timestamp, timestamp > '$start' AS new"
-  row_filter="timestamp > '$start' OR (consolidated_at IS NULL AND valid_until IS NULL)"
+  working_filter="timestamp > '$start' OR (consolidated_at IS NULL AND valid_until IS NULL)"
+  episodic_filter="timestamp > '$start'"
   sqlite3 -readonly -json "$before_db" \
-    "SELECT 'working_memory' AS tbl, $row_columns FROM working_memory WHERE $row_filter UNION ALL SELECT 'episodic_memory' AS tbl, $row_columns FROM episodic_memory WHERE $row_filter ORDER BY timestamp" >"$rows" ||
+    "SELECT 'working_memory' AS tbl, $row_columns FROM working_memory WHERE $working_filter UNION ALL SELECT 'episodic_memory' AS tbl, $row_columns FROM episodic_memory WHERE $episodic_filter ORDER BY timestamp" >"$rows" ||
     die "sqlite3 cannot read the memory rows of $before_db"
 fi
 [[ -s $rows ]] || printf '[]\n' >"$rows"
