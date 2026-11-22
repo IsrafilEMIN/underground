@@ -57,7 +57,7 @@ Preconditions:
 - A failed first clone leaves `~/work/<owner>/<name>/.git` behind. The next start then treats it as a clone: it opens omp in an empty directory with exit `0` and never clones again, and the only sign is a background-fetch failure notice on the start after that. This is current product behavior (`ss-clone-retry`), not a stand-in artifact.
 - The failed-fetch notice quotes only the last line of `.git/ug-fetch.log`. For git errors that is `and the repository exists.`, which does not name the cause. Read the whole log.
 - The fetch-failure and kept-items notices describe the previous background fetch. The start that runs the failing fetch shows nothing, and the first start after a fix still shows the old failure.
-- A dream report newer than 24 h shows its `Summary:` even when it is not `Status: pending`, unless a proposal has `Status: accepted` or `Status: rejected`. Age the file with `touch -t`, or mark a proposal decided, to test the reviewed case.
+- A dream report newer than 24 h with no `Status:` line shows its `Summary:`. Once every proposal has a status other than `pending`, it shows nothing. Age the file with `touch -t`, or mark a proposal decided, to test the reviewed case.
 - The newest report is chosen by file time, not by name. Park old reports with `mv`, or a stale `Failure:` report hides a newer one.
 - Sweep ageing needs all of the worktree's `HEAD`, `index`, `logs/HEAD` and `logs/refs/heads/<branch>` aged. Any `git` command that touches the worktree after `touch -t` makes it fresh again.
 - `ss-check` uses `$B/fixtures/omp-config.json`. Restore it, or every later start carries setting notices.
