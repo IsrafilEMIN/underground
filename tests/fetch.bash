@@ -27,6 +27,8 @@ fetch_fixture() {
   chmod +x "$fx_root/code/bin/gh"
   render "$UG_REPO_ROOT/host/agent/agent-start" "$UG_TMPDIR/agent-start" \
     AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9
+  render "$UG_REPO_ROOT/host/agent/agent-env" "$fx_root/code/agent-env" \
+    AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9
   fx_git init -q --bare -b main "$fx_origin" || fail 'cannot make the bare origin'
   fx_git init -q -b main "$UG_TMPDIR/seed" || fail 'cannot make the seed repo'
   fx_git -C "$UG_TMPDIR/seed" remote add origin "$fx_origin"

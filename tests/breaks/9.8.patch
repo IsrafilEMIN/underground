@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -222,7 +222,7 @@ agent_check_report() {
+   [[ -f $code/bin/agent-check ]] || return 0
+   out=$("$code/bin/agent-check" "$code/requirements" 2>/dev/null) || true
+   while IFS= read -r line; do
+-    [[ -z $line ]] || add_notice "$line"
++    [[ -z $line ]] || :
+   done <<<"$out"
+ }
+ 

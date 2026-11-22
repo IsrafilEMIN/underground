@@ -1,0 +1,12 @@
+diff --git a/host/agent/com.underground.agent-dream.plist b/host/agent/com.underground.agent-dream.plist
+--- a/host/agent/com.underground.agent-dream.plist
++++ b/host/agent/com.underground.agent-dream.plist
+@@ -16,7 +16,7 @@
+   <key>StartCalendarInterval</key>
+   <dict>
+     <key>Hour</key>
+-    <integer>4</integer>
++    <integer>3</integer>
+     <key>Minute</key>
+     <integer>0</integer>
+   </dict>

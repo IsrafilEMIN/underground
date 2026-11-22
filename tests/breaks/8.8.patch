@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -32,7 +32,7 @@
+     [[ -e $HOME/${BASH_REMATCH[1]} ]] ||
+       printf '~/%s is missing; underground needs it: %s. add it to your agent-config\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+   else
+-    printf 'agent-check cannot read this line of %s: %s\n' "$requirements" "$line"
++    continue
+   fi
+ done <"$requirements"
+ 

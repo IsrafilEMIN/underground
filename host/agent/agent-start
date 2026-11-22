@@ -1,13 +1,10 @@
 #!/bin/bash
 set -eo pipefail
 
-TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)
-export HOME=@AGENT_HOME@ TMPDIR PATH=@ROOT@/code/bin:/usr/bin:/bin:/usr/sbin:/sbin
-export OMP_AUTH_BROKER_URL=http://127.0.0.1:@USAGE_BROKER_PORT@ OMP_AUTH_BROKER_TOKEN=usage-only
-export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1='!f() { t=$("@ROOT@/code/bin/gh-app-token") || exit 1; echo username=x-access-token; echo "password=$t"; }; f'
-
 root=@ROOT@
 code=$root/code
+source "$code/agent-env" || { printf 'agent-start: cannot read %s/agent-env; the owner runs host/bin/ug-agent-setup\n' "$code" >&2; exit 1; }
+ug_agent_env agent-start || exit 1
 agent=$HOME/.omp/agent
 
 die() {
@@ -16,10 +13,6 @@ die() {
 }
 export UG_NOTICES=${UG_NOTICES:-}
 add_notice() { UG_NOTICES=${UG_NOTICES:+$UG_NOTICES$'\n'}$1; }
-
-[[ -r $root/gateway-token ]] || die "cannot read $root/gateway-token; the owner runs host/bin/ug-setup"
-export UG_GATEWAY_TOKEN=$(<"$root/gateway-token")
-[[ -n $UG_GATEWAY_TOKEN ]] || die "$root/gateway-token is empty; the owner runs host/bin/ug-setup"
 
 omp_bin=$(readlink "$code/bin/omp") || die "no $code/bin/omp; the owner runs host/bin/ug-setup"
 
@@ -199,10 +192,46 @@ sync_report() {
   fi
 }
 
+dream_report() {
+  local log=$root/logs/agent-dream.log line failed= report= newest=0 t f note summary
+  line=$(tail -n 1 "$log" 2>/dev/null) || line=
+  [[ ! $line =~ ^[^\ ]+\ failed:\ (.*)$ ]] || failed=${BASH_REMATCH[1]}
+  for f in "$agent"/dreams/*.md; do
+    [[ -f $f ]] || continue
+    t=$(stat -f %m "$f") || continue
+    if ((t > newest)); then newest=$t report=$f; fi
+  done
+  note=
+  [[ -z $report ]] || note=$(grep -m 1 '^Failure: ' "$report") || note=
+  if [[ -n $failed ]]; then
+    add_notice "the last dream failed: $failed; read $log"
+  elif [[ -n $note ]]; then
+    add_notice "the last dream failed: ${note#Failure: }; read $report"
+  fi
+  [[ -n $report && -z $note ]] || return 0
+  summary=$(grep -m 1 '^Summary:' "$report") || return 0
+  summary=${summary#Summary:}
+  summary=${summary# }
+  if grep -q '^Status: pending' "$report" || (($(date +%s) - newest < 86400)); then
+    add_notice "dream: $summary say \"review the dream\" to review."
+  fi
+}
+
+agent_check_report() {
+  local out line
+  [[ -f $code/bin/agent-check ]] || return 0
+  out=$("$code/bin/agent-check" "$code/requirements" 2>/dev/null) || true
+  while IFS= read -r line; do
+    [[ -z $line ]] || add_notice "$line"
+  done <<<"$out"
+}
+
 for dir in "$HOME/.omp" "$agent"; do
   if [[ -L $dir || ( -e $dir && ! -d $dir ) ]]; then rm -f "$dir"; fi
   mkdir -p "$dir"
 done
+dream_report
+agent_check_report
 
 if [[ -z ${UG_REPO:-} ]]; then
   mkdir -p "$HOME/scratch"

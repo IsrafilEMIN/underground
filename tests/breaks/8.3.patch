@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -29,7 +29,7 @@
+     expected+=("${BASH_REMATCH[2]}")
+     reasons+=("${BASH_REMATCH[3]}")
+   elif [[ $line =~ $file_re ]]; then
+-    [[ -e $HOME/${BASH_REMATCH[1]} ]] ||
++    [[ -e $HOME/.omp ]] ||
+       printf '~/%s is missing; underground needs it: %s. add it to your agent-config\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+   else
+     printf 'agent-check cannot read this line of %s: %s\n' "$requirements" "$line"

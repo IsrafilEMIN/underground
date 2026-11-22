@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -212,7 +212,7 @@ dream_report() {
+   summary=$(grep -m 1 '^Summary:' "$report") || return 0
+   summary=${summary#Summary:}
+   summary=${summary# }
+-  if grep -q '^Status: pending' "$report" || (($(date +%s) - newest < 86400)); then
++  if (($(date +%s) - newest < 86400)); then
+     add_notice "dream: $summary say \"review the dream\" to review."
+   fi
+ }

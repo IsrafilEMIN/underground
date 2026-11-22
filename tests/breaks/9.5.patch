@@ -1,0 +1,11 @@
+diff --git a/host/agent/agent-dream b/host/agent/agent-dream
+--- a/host/agent/agent-dream
++++ b/host/agent/agent-dream
+@@ -205,6 +205,7 @@ if [[ -e $report ]]; then
+ fi
+ cp "$run/answer.md" "$report"
+ 
++printf '%s\n' "$end" >"$state_file"
+ failure=
+ if ((omp_rc != 0)); then
+   failure="omp exited $omp_rc; read $run/omp.err"

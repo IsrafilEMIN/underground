@@ -4,3 +4,4 @@ com.underground.auth-gateway|auth gateway|daemon|auth_user|host/agent/com.underg
 com.underground.usage-broker|usage broker|daemon|auth_user|host/agent/com.underground.usage-broker.plist|http http://127.0.0.1:@USAGE_BROKER_PORT@/v1/healthz|@ROOT@/logs/usage-broker.log|@ROOT@/code/usage-broker @ROOT@/code/facts
 com.underground.agent-sshd|agent sshd|daemon|root|host/agent/com.underground.agent-sshd.plist|port 127.0.0.1:@AGENT_SSHD_PORT@||@ROOT@/code/sshd_config @ROOT@/ssh_host_ed25519_key.pub
 com.underground.agent-pf|agent pf|daemon|root|host/agent/com.underground.agent-pf.plist|pf @AUTH_BROKER_PORT@||@ROOT@/code/pf-load @ROOT@/code/pf.conf
+com.underground.agent-dream|agent dream|daemon|agent_user|host/agent/com.underground.agent-dream.plist|launchd|@ROOT@/logs/agent-dream.log|@ROOT@/code/agent-dream @ROOT@/code/agent-env @ROOT@/code/dream-prompt.md

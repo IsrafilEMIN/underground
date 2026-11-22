@@ -237,7 +237,7 @@ ug_step "agent code"
 engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 [[ $engine =~ $ip_port ]] || ug_die ug-agent-setup "$data/addresses needs an engine=<ip>:<port> line"
 
-for name in agent-session agent-start sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
+for name in agent-session agent-start agent-env agent-dream sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
   render "host/agent/$name"
 done
 render "host/agent/gh-app-token"
@@ -247,13 +247,14 @@ rm -rf "$code.new" "$code.old"
 install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/usage-broker" "$code.new/authorized_keys"
 ln -s "$omp_bin" "$code.new/bin/omp"
 install -m 555 -o root -g wheel "$rendered_dir/gh-app-token" "$rendered_dir/gh" "$code.new/bin/"
-install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$rendered_dir/agent-unpack" "$code.new/bin/"
+install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$rendered_dir/agent-unpack" "$src/host/agent/agent-check" "$code.new/bin/"
 install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-broker/"
 install -m 444 -o root -g wheel "$src/host/facts" "$rendered_dir/sshd_config" "$code.new/"
-install -m 444 -o root -g wheel "$src/host/agent/ug-notices.ts" "$code.new/"
+install -m 444 -o root -g wheel "$src/host/agent/ug-notices.ts" "$src/host/agent/dream-prompt.md" "$rendered_dir/agent-env" "$code.new/"
+install -m 444 -o root -g wheel "$src/host/requirements" "$code.new/requirements"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
 install -m 555 -o root -g wheel "$rendered_dir/agent-pf-load" "$code.new/pf-load"
-install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$code.new/"
+install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$rendered_dir/agent-dream" "$code.new/"
 cut -d ' ' -f 1,2 "$owner_key.pub" >"$code.new/authorized_keys/$agent_user"
 chown -hR root:wheel "$code.new"
 chmod 444 "$code.new/authorized_keys/$agent_user"
@@ -359,7 +360,7 @@ ug_say ok "omp on PATH" "$bin_dir/omp"
 
 sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
 cleanup+=("$sudoers_tmp")
-printf '%s ALL=(%s) NOPASSWD: %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" >"$sudoers_tmp"
+printf '%s ALL=(%s) NOPASSWD: %s, %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" "$code/bin/agent-check" >"$sudoers_tmp"
 visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "visudo rejects the sudoers rules for the agent helpers; nothing installed"
 install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
 ug_say ok "sudoers" "$owner may run the agent helpers as $agent_user"
