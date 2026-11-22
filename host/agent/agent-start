@@ -212,7 +212,9 @@ dream_report() {
   summary=$(grep -m 1 '^Summary:' "$report") || return 0
   summary=${summary#Summary:}
   summary=${summary# }
-  if grep -q '^Status: pending' "$report" || (($(date +%s) - newest < 86400)); then
+  # A decided proposal means the owner reviewed the report, so only a pending one keeps the notice.
+  if grep -q '^Status: pending' "$report" ||
+    { (($(date +%s) - newest < 86400)) && ! grep -Eq '^Status: (accepted|rejected)' "$report"; }; then
     add_notice "dream: $summary say \"review the dream\" to review."
   fi
 }

@@ -276,6 +276,10 @@ t_9_6() {
   dr_report 2026-01-04.md 90000 $'# Dream\n\nSummary: 1 pending.\n\n## Proposals\n### 1. x\nStatus: pending\n'
   run_start
   assert_eq "dream: 1 pending.$hint" "$dr_notices" 'an old report with a pending proposal gives its summary'
+
+  dr_report 2026-01-05.md 3600 $'# Dream\n\nSummary: 1 pending.\n\n## Proposals\n### 1. x\nStatus: rejected\n### 2. y\nStatus: accepted\n'
+  run_start
+  assert_eq '' "$dr_notices" 'a report younger than a day whose proposals are all decided gives no notice'
 }
 
 t_9_7() {
