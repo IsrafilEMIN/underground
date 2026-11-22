@@ -1,7 +1,7 @@
 diff --git a/host/agent/agent-check b/host/agent/agent-check
 --- a/host/agent/agent-check
 +++ b/host/agent/agent-check
-@@ -45,6 +45,7 @@
+@@ -78,6 +78,7 @@
  
  command -v omp >/dev/null 2>&1 || settings_unreadable 'omp is not on PATH'
  command -v jq >/dev/null 2>&1 || settings_unreadable 'jq is not on PATH'

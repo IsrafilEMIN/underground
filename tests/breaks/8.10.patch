@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -57,7 +57,7 @@
+   paths=$(jq -r '
+     if type != "object" then error("not an object") else . end
+     | (.marketplace // [])[] | (.entries // [])[]
+-    | select(.enabled != false) | .installPath | strings
++    | .installPath | strings
+   ' <<<"$plugins" 2>/dev/null) || { plugins_unreadable 'omp printed plugins that are not json'; return 0; }
+   for i in "${!skills[@]}"; do
+     while IFS= read -r path; do

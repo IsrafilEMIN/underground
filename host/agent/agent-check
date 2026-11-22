@@ -3,6 +3,7 @@ set -euo pipefail
 
 setting_re='^setting ([^=[:space:]]+)=([^[:space:]]*): (.+)$'
 file_re='^file ([^[:space:]]+): (.+)$'
+skill_re='^skill ([^[:space:]/]+): (.+)$'
 
 die() {
   printf 'agent-check: %s\n' "$*" >&2
@@ -21,6 +22,8 @@ requirements=${1:-$self_dir/requirements}
 keys=()
 expected=()
 reasons=()
+skills=()
+skill_reasons=()
 while IFS= read -r line || [[ -n $line ]]; do
   if [[ -z ${line//[[:space:]]/} ]]; then
     continue
@@ -31,10 +34,40 @@ while IFS= read -r line || [[ -n $line ]]; do
   elif [[ $line =~ $file_re ]]; then
     [[ -e $HOME/${BASH_REMATCH[1]} ]] ||
       printf '~/%s is missing; underground needs it: %s. add it to your agent-config\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  elif [[ $line =~ $skill_re ]]; then
+    [[ -e $HOME/.omp/agent/skills/${BASH_REMATCH[1]}/SKILL.md ]] || {
+      skills+=("${BASH_REMATCH[1]}")
+      skill_reasons+=("${BASH_REMATCH[2]}")
+    }
   else
     printf 'agent-check cannot read this line of %s: %s\n' "$requirements" "$line"
   fi
 done <"$requirements"
+
+plugins_unreadable() {
+  printf 'agent-check cannot read the omp plugins (%s), so %s skills that underground needs are not checked\n' "$1" "${#skills[@]}"
+}
+
+check_skills() {
+  local plugins paths i path
+  ((${#skills[@]})) || return 0
+  command -v omp >/dev/null 2>&1 || { plugins_unreadable 'omp is not on PATH'; return 0; }
+  command -v jq >/dev/null 2>&1 || { plugins_unreadable 'jq is not on PATH'; return 0; }
+  plugins=$(omp plugin list --json 2>/dev/null) || { plugins_unreadable 'omp plugin list failed'; return 0; }
+  paths=$(jq -r '
+    if type != "object" then error("not an object") else . end
+    | (.marketplace // [])[] | (.entries // [])[]
+    | select(.enabled != false) | .installPath | strings
+  ' <<<"$plugins" 2>/dev/null) || { plugins_unreadable 'omp printed plugins that are not json'; return 0; }
+  for i in "${!skills[@]}"; do
+    while IFS= read -r path; do
+      if [[ -n $path && -e $path/skills/${skills[i]}/SKILL.md ]]; then continue 2; fi
+    done <<<"$paths"
+    printf 'the %s skill is missing; underground needs it: %s. install the omp plugin that has it, or add it to your agent-config skills/\n' "${skills[i]}" "${skill_reasons[i]}"
+  done
+}
+
+check_skills
 
 ((${#keys[@]})) || exit 0
 

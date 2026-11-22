@@ -8,7 +8,7 @@ description: Drive the Underground host scripts (host/bin/ug-agent launcher, ug-
 Underground is a macOS host kit, not a server. Its users touch command-line tools:
 
 - The **owner** (an admin account) runs `host/bin/ug-setup` once, then starts agent sessions with `omp` (= `host/bin/ug-agent`), and launchd runs `host/bin/ug-backup` daily. `host/bin/ug-auth` manages model credentials.
-- The **agent** (user `ugagent`) gets each session through the agent sshd: `code/agent-session` → `code/agent-start` → omp, with warning notices. launchd runs `code/agent-dream` nightly. `code/bin/agent-check` reports missing omp settings.
+- The **agent** (user `ugagent`) gets each session through the agent sshd: `code/agent-session` → `code/agent-start` → omp, with warning notices. launchd runs `code/agent-dream` nightly. `code/bin/agent-check` reports missing omp settings, agent-config files and skills.
 
 The real install is one per machine (users `ugagent`/`ugauth`, `/Library/Underground`, system LaunchDaemons, port 2222). It cannot run twice, and it belongs to the user. **Never drive it**: do not run `ug-setup`, `ug-agent-setup`, `ug-auth` or `sudo` against it, and do not run `host/bin/ug-agent` with your real `HOME`. Verify in a stand-in instead.
 
@@ -22,10 +22,10 @@ The real install is one per machine (users `ugagent`/`ugauth`, `/Library/Undergr
 | `root/code/` | `host/agent/*` rendered with the repo's own `ug_render` and laid out like `host/bin/ug-agent-setup:240-258` (`agent-session`, `agent-start`, `agent-env`, `agent-dream`, `requirements`, `ug-notices.ts`, `bin/{omp,gh,agent-check,agent-home-tar,agent-unpack}`) |
 | `root/gateway-token`, `root/logs/` | what `agent-env` and `agent-start` read |
 | `owner-home/` (mode 700) | owner `HOME`; `.local/share/underground/` holds the agent ssh key, `known_hosts`, an empty `sources`, `backup/{password,config}` and the pinned restic path |
-| `agent-home/` (mode 700) | the agent `HOME`; `.omp/agent/` has placeholder files for the `file` lines of `host/requirements` (scaffolding); `.gitconfig` rewrites `https://github.com/` to `origins/`, so a first clone of a `ugv repo` slug stays offline and any other GitHub URL fails offline |
+| `agent-home/` (mode 700) | the agent `HOME`; `.omp/agent/` has placeholder files for the `file` lines of `host/requirements` and a placeholder `skills/<name>/SKILL.md` for each `skill <name>` line (scaffolding); `.gitconfig` rewrites `https://github.com/` to `origins/`, so a first clone of a `ugv repo` slug stays offline and any other GitHub URL fails offline |
 | `stubs/` | first on the owner `PATH` (see below) |
 | `calls/<stub>.log` | every stub call: time, cwd, argv, notes |
-| `fixtures/` | `omp-config.json` (meets `host/requirements`), optional `omp-answer.md`, `gh-pr-list` |
+| `fixtures/` | `omp-config.json` (meets `host/requirements`), `omp-plugins.json` (no plugins: `{"npm":[],"marketplace":[]}`), optional `omp-answer.md`, `gh-pr-list` |
 | `faults/` | `ugv fault` files that make a stub fail |
 | `backup-repo/` | the restic stand-in; `snapshots/NNN.tar` are the real `agent-home-tar` streams |
 | `origins/`, `seeds/` | local bare repos and their seed checkouts from `ugv repo` |
@@ -39,10 +39,10 @@ Stubs replace only production boundaries. Everything between them is the real co
 | `launchctl` | `print` exits 113 (not loaded); every other verb is refused |
 | `nc` | the port answers |
 | `restic` | local repo in `backup-repo/`; `backup --stdin-from-command -- CMD` really runs CMD and stores its stdout |
-| `omp` (`root/code/bin/omp`) | `config list --json` → `fixtures/omp-config.json`; `config get` → `(not set)`; a session prints `omp-stub: session started in <cwd>` and one `omp-stub: warning notice: <line>` per `UG_NOTICES` line, as `ug-notices.ts` would show them; `-p` prints `fixtures/omp-answer.md`; all record `HOME`, `UG_REPO`, `UG_NOTICES`, gateway token presence, broker URL |
+| `omp` (`root/code/bin/omp`) | `config list --json` → `fixtures/omp-config.json`; `config get` → `(not set)`; `plugin list --json` → `fixtures/omp-plugins.json`; a session prints `omp-stub: session started in <cwd>` and one `omp-stub: warning notice: <line>` per `UG_NOTICES` line, as `ug-notices.ts` would show them; `-p` prints `fixtures/omp-answer.md`; all record `HOME`, `UG_REPO`, `UG_NOTICES`, gateway token presence, broker URL |
 | `gh` | `pr list` prints `fixtures/gh-pr-list`; everything else is refused |
 
-Fault names for `ugv fault RUN NAME RC|clear`: `sudo`, `launchctl`, `launchctl-print`, `ssh`, `ssh-agent`, `ssh-backup`, `nc`, `restic`, `restic-cat`, `restic-init`, `restic-unlock`, `restic-backup`, `restic-check`, `omp`, `omp-config`, `gh`.
+Fault names for `ugv fault RUN NAME RC|clear`: `sudo`, `launchctl`, `launchctl-print`, `ssh`, `ssh-agent`, `ssh-backup`, `nc`, `restic`, `restic-cat`, `restic-init`, `restic-unlock`, `restic-backup`, `restic-check`, `omp`, `omp-config` (`omp config ...`), `omp-plugins` (`omp plugin ...`), `gh`.
 
 ## Launch
 

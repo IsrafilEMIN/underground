@@ -7,7 +7,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Work from the repo root of the worktree under test. Set `U=.omp/skills/verify-underground/scripts/ugv`.
 - Build a fresh stand-in per run: `RUN=$(date +%Y%m%d-%H%M%S)-<feature>` and `$U up "$RUN"`. Base is `/private/tmp/ugv-$RUN`; this map writes it as `B=/private/tmp/ugv-$RUN`.
 - `$U doctor "$RUN"` ends with `doctor: ok` before the first drive.
-- The baseline from `ugv up`: no backup has run (`backup/last` is missing), `sources` lists nothing, no repo exists, every omp setting in `host/requirements` is met, all files in `host/requirements` exist in the agent home, no dream has run, no faults are set.
+- The baseline from `ugv up`: no backup has run (`backup/last` is missing), `sources` lists nothing, no repo exists, every omp setting in `host/requirements` is met, all files and skills in `host/requirements` exist in the agent home, no omp plugin is installed, no dream has run, no faults are set.
 - Never drive the real install (`/Library/Underground`, real `HOME`, real `sudo`). Never drive a stand-in that another run created.
 
 ## Driving conventions
@@ -45,7 +45,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Sync source repos to the agent](./sync-sources.md) covers the owner's `sources` list, unpacked into the agent home at every launch.
 - [Back up the agent home](./backup.md) covers the daily `ug-backup`: first-run repo creation, snapshot contents, retries, check failure, and the `last` record.
 - [Nightly dream](./dream.md) covers `agent-dream`: skip, success report, failures, and the lock.
-- [Requirements check](./requirements-check.md) covers `agent-check` warnings for omp settings and agent-config files.
+- [Requirements check](./requirements-check.md) covers `agent-check` warnings for omp settings, agent-config files and skills (from the user skills dir or an omp plugin).
 
 ## Not drivable in the stand-in
 

@@ -1,7 +1,7 @@
 diff --git a/host/agent/agent-check b/host/agent/agent-check
 --- a/host/agent/agent-check
 +++ b/host/agent/agent-check
-@@ -63,8 +63,7 @@
+@@ -96,8 +96,7 @@
    case $state in
      unknown)
        printf '%s is not a setting of this omp; underground needs %s: %s. update omp\n' "$key" "$want" "$reason" ;;

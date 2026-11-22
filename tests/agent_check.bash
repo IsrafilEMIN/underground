@@ -7,13 +7,30 @@ ac_setup() {
   AC_REQ=$UG_TMPDIR/requirements
   AC_CALLS=$UG_TMPDIR/omp.calls
   mkdir -p "$AC_HOME" "$AC_STUBS" || fail 'cannot make the scratch home and stubs'
+  printf '%s\n' '{"npm":[],"marketplace":[]}' >"$UG_TMPDIR/plugins.json" || fail 'cannot write the stub plugins'
   ac_settings '{}'
+}
+
+ac_stub() {
+  ac_omp "case \$* in
+  'config list --json') cat '$UG_TMPDIR/settings.json' ;;
+  'plugin list --json') cat '$UG_TMPDIR/plugins.json' ;;
+  *) exit 3 ;;
+esac"
 }
 
 ac_settings() {
   printf '%s\n' "$1" >"$UG_TMPDIR/settings.json" || fail 'cannot write the stub settings'
-  ac_omp "[[ \$* == 'config list --json' ]] || exit 3
-cat '$UG_TMPDIR/settings.json'"
+  ac_stub
+}
+
+ac_plugins() {
+  printf '%s\n' "$1" >"$UG_TMPDIR/plugins.json" || fail 'cannot write the stub plugins'
+  ac_stub
+}
+
+ac_skill() {
+  mkdir -p "$1/skills/$2" && : >"$1/skills/$2/SKILL.md" || fail "cannot write the skill $2 in $1"
 }
 
 ac_omp() {
@@ -137,9 +154,9 @@ t_8_7() {
     assert_contains "${want%%=*} is not a setting of this omp; underground needs ${want#*=}:" "$ac_out" \
       "host/requirements needs $want"
   done
-  for want in .omp/agent/skills/dream-review/SKILL.md .omp/agent/extensions/underground-guard.ts; do
-    assert_contains "~/$want is missing; underground needs it:" "$ac_out" "host/requirements needs the file $want"
-  done
+  assert_contains 'the dream-review skill is missing; underground needs it:' "$ac_out" 'host/requirements needs the dream-review skill'
+  assert_contains '~/.omp/agent/extensions/underground-guard.ts is missing; underground needs it:' "$ac_out" \
+    'host/requirements needs the file .omp/agent/extensions/underground-guard.ts'
 }
 
 t_8_8() {
@@ -165,4 +182,69 @@ t_8_9() {
   assert_eq 0 "$ac_rc" "agent-check exits 0 ($ac_err)"
   assert_eq 'memory.backend is not a setting of this omp; underground needs mnemopi: the dream reads mnemopi. update omp' \
     "$ac_out" 'agent-check finds the omp next to itself when omp is not on PATH'
+}
+
+t_8_10() {
+  local p1 p2
+  ac_setup
+  p1=$UG_TMPDIR/plugins/arkan
+  p2=$UG_TMPDIR/plugins/other
+  ac_requirements \
+    'skill dream-review: the review flow loads it' \
+    'skill helper: the dream calls it'
+  ac_skill "$AC_HOME/.omp/agent" dream-review
+  ac_skill "$AC_HOME/.omp/agent" helper
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 with the skills in the user dir ($ac_err)"
+  assert_eq '' "$ac_out" 'agent-check accepts skills in the user skills dir'
+  assert_eq '' "$(cat "$AC_CALLS" 2>/dev/null)" 'agent-check does not ask omp for plugins when the user dir has every skill'
+  rm -rf "$AC_HOME/.omp/agent/skills" || fail 'cannot remove the user skills'
+  ac_skill "$p1" dream-review
+  ac_skill "$p2" helper
+  ac_plugins "{\"npm\":[],\"marketplace\":[{\"id\":\"arkan@arkan\",\"scope\":\"user\",\"entries\":[{\"scope\":\"user\",\"installPath\":\"$p1\",\"version\":\"0.1.7\"}]},{\"id\":\"other@other\",\"scope\":\"user\",\"entries\":[{\"scope\":\"user\",\"installPath\":\"$p2\",\"version\":\"1.0.0\",\"enabled\":false}]}]}"
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 with the skills in plugins ($ac_err)"
+  assert_eq 'the helper skill is missing; underground needs it: the dream calls it. install the omp plugin that has it, or add it to your agent-config skills/' \
+    "$ac_out" 'agent-check accepts a skill of an enabled plugin, and not a skill of a disabled plugin'
+  assert_eq 'plugin list --json' "$(cat "$AC_CALLS")" 'agent-check calls omp once for all plugins'
+  ac_plugins "{\"npm\":[],\"marketplace\":[{\"id\":\"arkan@arkan\",\"scope\":\"user\",\"entries\":[{\"scope\":\"user\",\"installPath\":\"$p1\",\"version\":\"0.1.7\"}]},{\"id\":\"other@other\",\"scope\":\"user\",\"entries\":[{\"scope\":\"user\",\"installPath\":\"$p2\",\"version\":\"1.0.0\",\"enabled\":true}]}]}"
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 with both plugins enabled ($ac_err)"
+  assert_eq '' "$ac_out" 'agent-check accepts the skill when its plugin is enabled'
+}
+
+t_8_11() {
+  ac_setup
+  ac_requirements \
+    'skill dream-review: the review flow loads it' \
+    'skill helper: the dream calls it' \
+    'setting memory.backend=mnemopi: the dream reads mnemopi'
+  ac_skill "$AC_HOME/.omp/agent" helper
+  rm -f "$AC_STUBS/omp"
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 without omp ($ac_err)"
+  assert_eq 'agent-check cannot read the omp plugins (omp is not on PATH), so 1 skills that underground needs are not checked
+agent-check cannot read the omp settings (omp is not on PATH), so 1 settings that underground needs are not checked' \
+    "$ac_out" 'agent-check counts only the skills that are not in the user dir when omp is missing'
+  rm -rf "$AC_HOME/.omp/agent/skills" || fail 'cannot remove the user skills'
+  ac_omp 'exit 1'
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 when omp fails ($ac_err)"
+  assert_eq 'agent-check cannot read the omp plugins (omp plugin list failed), so 2 skills that underground needs are not checked
+agent-check cannot read the omp settings (omp config list failed), so 1 settings that underground needs are not checked' \
+    "$ac_out" 'agent-check prints one warning when omp plugin list fails'
+  ac_settings '{"memory.backend":{"value":"mnemopi","type":"enum"}}'
+  ac_plugins 'Working...'
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 when omp prints plugins that are not json ($ac_err)"
+  assert_eq 'agent-check cannot read the omp plugins (omp printed plugins that are not json), so 2 skills that underground needs are not checked' \
+    "$ac_out" 'agent-check prints one warning when omp prints plugins that are not json'
+  ac_plugins '{"npm":[],"marketplace":[]}'
+  ac_settings 'Working...'
+  ac_run "$AC_REQ"
+  assert_eq 0 "$ac_rc" "agent-check exits 0 when omp prints settings that are not json ($ac_err)"
+  assert_eq 'the dream-review skill is missing; underground needs it: the review flow loads it. install the omp plugin that has it, or add it to your agent-config skills/
+the helper skill is missing; underground needs it: the dream calls it. install the omp plugin that has it, or add it to your agent-config skills/
+agent-check cannot read the omp settings (omp printed settings that are not json), so 1 settings that underground needs are not checked' \
+    "$ac_out" 'agent-check still warns about skills, before the settings, when it cannot read the settings'
 }
