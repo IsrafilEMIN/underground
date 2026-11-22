@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-dream b/host/agent/agent-dream
+--- a/host/agent/agent-dream
++++ b/host/agent/agent-dream
+@@ -25,7 +25,7 @@ mkdir -p "$dreams" "$runs"
+ 
+ if [[ -z ${UG_DREAM_LOCKED:-} ]]; then
+   rc=0
+-  UG_DREAM_LOCKED=1 /usr/bin/lockf -k -t 0 "$dreams/.lock" /bin/bash "${BASH_SOURCE[0]}" || rc=$?
++  UG_DREAM_LOCKED=1 /bin/bash "${BASH_SOURCE[0]}" || rc=$?
+   if ((rc == 75)); then
+     say "skipped: another dream holds $dreams/.lock"
+     exit 0

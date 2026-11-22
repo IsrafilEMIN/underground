@@ -1,0 +1,14 @@
+# shellcheck shell=bash
+
+ug_agent_env() {
+  local who=$1 root=@ROOT@
+  TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)
+  export HOME=@AGENT_HOME@ TMPDIR PATH=@ROOT@/code/bin:/usr/bin:/bin:/usr/sbin:/sbin
+  export OMP_AUTH_BROKER_URL=http://127.0.0.1:@USAGE_BROKER_PORT@ OMP_AUTH_BROKER_TOKEN=usage-only
+  export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1='!f() { t=$("@ROOT@/code/bin/gh-app-token") || exit 1; echo username=x-access-token; echo "password=$t"; }; f'
+
+  [[ -r $root/gateway-token ]] || { printf '%s: cannot read %s/gateway-token; the owner runs host/bin/ug-setup\n' "$who" "$root" >&2; return 1; }
+  UG_GATEWAY_TOKEN=$(<"$root/gateway-token")
+  export UG_GATEWAY_TOKEN
+  [[ -n $UG_GATEWAY_TOKEN ]] || { printf '%s: %s/gateway-token is empty; the owner runs host/bin/ug-setup\n' "$who" "$root" >&2; return 1; }
+}

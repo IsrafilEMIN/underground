@@ -1,0 +1,13 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -63,8 +63,7 @@
+   case $state in
+     unknown)
+       printf '%s is not a setting of this omp; underground needs %s: %s. update omp\n' "$key" "$want" "$reason" ;;
+-    unset)
+-      printf '%s is unset; underground needs %s: %s. set it in your agent-config config.yml\n' "$key" "$want" "$reason" ;;
++    unset) ;;
+     "value $want") ;;
+     *)
+       printf '%s is %s; underground needs %s: %s. set it in your agent-config config.yml\n' "$key" "${state#value }" "$want" "$reason" ;;

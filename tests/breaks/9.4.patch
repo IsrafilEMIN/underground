@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-dream b/host/agent/agent-dream
+--- a/host/agent/agent-dream
++++ b/host/agent/agent-dream
+@@ -114,7 +114,7 @@ for f in ${session_files[@]+"${session_files[@]}"}; do
+     continue
+   fi
+   n=$(jq -Rs length <"$section")
+-  if ((n > room)); then
++  if ((n > room * 2)); then
+     jq -Rrsj --argjson room "$room" '.[0:$room]' <"$section" >>"$sessions_body"
+     printf '\n\n[truncated: the digest reached its total cap of %s characters inside this session]\n\n' "$total_cap" >>"$sessions_body"
+     used=$total_cap

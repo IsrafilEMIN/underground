@@ -1,0 +1,11 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -195,7 +195,6 @@ sync_report() {
+ dream_report() {
+   local log=$root/logs/agent-dream.log line failed= report= newest=0 t f note summary
+   line=$(tail -n 1 "$log" 2>/dev/null) || line=
+-  [[ ! $line =~ ^[^\ ]+\ failed:\ (.*)$ ]] || failed=${BASH_REMATCH[1]}
+   for f in "$agent"/dreams/*.md; do
+     [[ -f $f ]] || continue
+     t=$(stat -f %m "$f") || continue

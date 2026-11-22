@@ -299,6 +299,24 @@ check_app_repos() {
   done <"$data/app-repos"
 }
 
+check_agent() {
+  local root agent_user out line
+  root=$(ug_fact root)
+  agent_user=$(ug_fact agent_user)
+  ug_step "agent check"
+  if ! out=$( (cd / && sudo -n -u "$agent_user" -H "$root/code/bin/agent-check" "$root/code/requirements") 2>/dev/null); then
+    ug_say warn "agent check" "sudo cannot run $root/code/bin/agent-check as $agent_user; run host/bin/ug-setup again"
+    return 0
+  fi
+  if [[ -z $out ]]; then
+    ug_say ok "agent check" "every requirement is met"
+    return 0
+  fi
+  while IFS= read -r line; do
+    [[ -z $line ]] || ug_say warn "agent check" "$line"
+  done <<<"$out"
+}
+
 finish() {
   local item n=0
   printf '\n%s%s✓ setup done%s\n' "$(ug_paint 1 bold)" "$(ug_paint 1 green)" "$(ug_paint 1 off)"
@@ -333,6 +351,7 @@ check_app_repos
 
 ug_step services
 start_services
+check_agent
 
 check_path
 finish

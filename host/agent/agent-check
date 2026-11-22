@@ -1,0 +1,73 @@
+#!/bin/bash
+set -euo pipefail
+
+setting_re='^setting ([^=[:space:]]+)=([^[:space:]]*): (.+)$'
+file_re='^file ([^[:space:]]+): (.+)$'
+
+die() {
+  printf 'agent-check: %s\n' "$*" >&2
+  exit 1
+}
+
+if (($# > 1)); then
+  printf 'usage: agent-check [requirements-file]\n' >&2
+  exit 64
+fi
+self_dir=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+export PATH=$self_dir:$PATH
+requirements=${1:-$self_dir/requirements}
+[[ -f $requirements && -r $requirements ]] || die "cannot read the requirements file $requirements"
+
+keys=()
+expected=()
+reasons=()
+while IFS= read -r line || [[ -n $line ]]; do
+  if [[ -z ${line//[[:space:]]/} ]]; then
+    continue
+  elif [[ $line =~ $setting_re ]]; then
+    keys+=("${BASH_REMATCH[1]}")
+    expected+=("${BASH_REMATCH[2]}")
+    reasons+=("${BASH_REMATCH[3]}")
+  elif [[ $line =~ $file_re ]]; then
+    [[ -e $HOME/${BASH_REMATCH[1]} ]] ||
+      printf '~/%s is missing; underground needs it: %s. add it to your agent-config\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  else
+    printf 'agent-check cannot read this line of %s: %s\n' "$requirements" "$line"
+  fi
+done <"$requirements"
+
+((${#keys[@]})) || exit 0
+
+settings_unreadable() {
+  printf 'agent-check cannot read the omp settings (%s), so %s settings that underground needs are not checked\n' "$1" "${#keys[@]}"
+  exit 0
+}
+
+command -v omp >/dev/null 2>&1 || settings_unreadable 'omp is not on PATH'
+command -v jq >/dev/null 2>&1 || settings_unreadable 'jq is not on PATH'
+settings=$(omp config list --json 2>/dev/null) || settings_unreadable 'omp config list failed'
+actual=$(jq -r '
+  if type != "object" then error("not an object") else . end
+  | . as $all
+  | $ARGS.positional[] as $key
+  | if ($all | has($key)) | not then "unknown"
+    elif ($all[$key] | has("value")) | not then "unset"
+    else "value " + ($all[$key].value | if type == "string" then . else tojson end | gsub("[\n\t]"; " "))
+    end
+' --args "${keys[@]}" <<<"$settings" 2>/dev/null) || settings_unreadable 'omp printed settings that are not json'
+
+i=0
+while IFS= read -r state; do
+  key=${keys[i]} want=${expected[i]} reason=${reasons[i]}
+  i=$((i + 1))
+  case $state in
+    unknown)
+      printf '%s is not a setting of this omp; underground needs %s: %s. update omp\n' "$key" "$want" "$reason" ;;
+    unset)
+      printf '%s is unset; underground needs %s: %s. set it in your agent-config config.yml\n' "$key" "$want" "$reason" ;;
+    "value $want") ;;
+    *)
+      printf '%s is %s; underground needs %s: %s. set it in your agent-config config.yml\n' "$key" "${state#value }" "$want" "$reason" ;;
+  esac
+done <<<"$actual"
+exit 0

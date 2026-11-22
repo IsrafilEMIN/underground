@@ -1,0 +1,11 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -14,7 +14,6 @@
+   exit 64
+ fi
+ self_dir=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+-export PATH=$self_dir:$PATH
+ requirements=${1:-$self_dir/requirements}
+ [[ -f $requirements && -r $requirements ]] || die "cannot read the requirements file $requirements"
+ 

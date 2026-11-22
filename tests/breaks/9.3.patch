@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-dream b/host/agent/agent-dream
+--- a/host/agent/agent-dream
++++ b/host/agent/agent-dream
+@@ -149,7 +149,7 @@ fi
+ new_rows=$(jq '[.[] | select(.new == 1)] | length' "$rows")
+ all_rows=$(jq 'length' "$rows")
+ 
+-if ((found == 0 && new_rows == 0)); then
++if ((found == 0 && all_rows == 0)); then
+   rm -rf "$run"
+   say "skipped: no sessions and no new memory rows since $start"
+   exit 0
