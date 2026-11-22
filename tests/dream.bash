@@ -69,6 +69,7 @@ dr_session() {
 dr_db() {
   dr_db_file=$UG_TMPDIR/mnemopi.db
   local cols='id TEXT PRIMARY KEY, content TEXT, source TEXT, timestamp TEXT, session_id TEXT, metadata_json TEXT, valid_until TEXT, scope TEXT'
+  /usr/bin/sqlite3 "$dr_db_file" "PRAGMA journal_mode=WAL" >/dev/null || fail 'cannot put the db in wal mode like the mnemopi db'
   /usr/bin/sqlite3 "$dr_db_file" "CREATE TABLE working_memory ($cols, consolidated_at TEXT)" || fail 'cannot make the table working_memory'
   /usr/bin/sqlite3 "$dr_db_file" "CREATE TABLE episodic_memory ($cols)" || fail 'cannot make the table episodic_memory'
   printf '%s\n' "$dr_db_file" >"$UG_TMPDIR/db-path"

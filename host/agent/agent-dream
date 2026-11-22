@@ -137,8 +137,10 @@ db=${db%%$'\n'*}
 rows=$run/rows.json
 : >"$rows"
 if [[ -f $db ]]; then
-  rm -f "$before_db"
+  rm -f "$before_db" "$before_db-wal" "$before_db-shm"
   sqlite3 "$db" ".backup '$before_db'" || die "sqlite3 cannot back up $db to $before_db"
+  # .backup keeps the wal mode of the mnemopi db, and sqlite3 -readonly cannot open a wal db without its -shm file
+  sqlite3 "$before_db" 'PRAGMA journal_mode=DELETE' >/dev/null || die "sqlite3 cannot take $before_db out of wal mode"
   row_columns="id, content, source, session_id, CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '\$.context') END AS context, timestamp, timestamp > '$start' AS new"
   working_filter="timestamp > '$start' OR (consolidated_at IS NULL AND valid_until IS NULL)"
   episodic_filter="timestamp > '$start'"
