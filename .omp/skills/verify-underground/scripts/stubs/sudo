@@ -1,0 +1,25 @@
+# sudo: runs `sudo -n -u USER [-H] CMD` for CMDs inside the stand-in, with a reset env like
+# sudo's env_reset. Anything else (a password prompt, root, a path outside the stand-in) is refused.
+fault sudo
+user=
+nonint=
+while (($#)); do
+  case $1 in
+    -n) nonint=1; shift ;;
+    -H) shift ;;
+    -u) user=${2:-}; shift 2 ;;
+    *) break ;;
+  esac
+done
+if [[ -n $nonint && -n $user && -n ${1:-} ]]; then
+  case $1 in
+    "$base"/*)
+      log_note "as $user: exec $1"
+      exec env -i HOME="$base/agent-home" USER="$user" LOGNAME="$user" SHELL=/bin/bash PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"
+      ;;
+  esac
+  log_note "refused: $1 is outside the stand-in"
+  exit 1
+fi
+log_note "refused: only 'sudo -n -u USER [-H] <stand-in path>' runs in the stand-in"
+exit 1

@@ -1,0 +1,40 @@
+# ssh: a login to ugagent@127.0.0.1 is served like the agent sshd does it (AcceptEnv UG_REPO
+# UG_NOTICES, ForceCommand code/agent-session); any other destination is the backup host.
+fault ssh
+dest=
+words=()
+dashdash=
+while (($#)); do
+  if [[ -n $dashdash ]]; then
+    words+=("$1")
+  elif [[ $1 == -- ]]; then
+    dashdash=1
+  elif [[ $1 == -[pioFlLRDEJSWbcem] ]]; then
+    shift
+  elif [[ $1 == -* ]]; then
+    :
+  elif [[ -z $dest ]]; then
+    dest=$1
+  else
+    words+=("$1")
+  fi
+  shift
+done
+case $dest in
+  ugagent@127.0.0.1)
+    fault ssh-agent
+    log_note "UG_REPO=${UG_REPO-<unset>}"
+    log_note "UG_NOTICES=$(printf '%q' "${UG_NOTICES-}")"
+    envs=(HOME="$base/agent-home" USER=ugagent LOGNAME=ugagent SHELL=/bin/bash PATH=/usr/bin:/bin:/usr/sbin:/sbin TERM="${TERM:-dumb}")
+    [[ -z ${UG_REPO+x} ]] || envs+=(UG_REPO="$UG_REPO")
+    [[ -z ${UG_NOTICES+x} ]] || envs+=(UG_NOTICES="$UG_NOTICES")
+    ((${#words[@]} == 0)) || envs+=(SSH_ORIGINAL_COMMAND="${words[*]}")
+    cd "$base/agent-home" || exit 255
+    exec env -i "${envs[@]}" "$base/root/code/agent-session"
+    ;;
+  *)
+    fault ssh-backup
+    log_note "backup host $dest answers (stand-in)"
+    exit 0
+    ;;
+esac

@@ -1,0 +1,66 @@
+# restic: a local repo in $base/backup-repo stands in for the sftp backup host. `backup
+# --stdin-from-command -- CMD` really runs CMD and stores its stdout as snapshots/NNN.tar.
+# Faults: restic (every call), restic-cat, restic-init, restic-unlock, restic-backup, restic-check.
+fault restic
+repo=
+sub=
+rest=()
+while (($#)); do
+  case $1 in
+    -r) repo=$2; shift 2 ;;
+    *)
+      if [[ -z $sub ]]; then sub=$1; else rest+=("$1"); fi
+      shift
+      ;;
+  esac
+done
+store=$base/backup-repo
+if [[ -z ${RESTIC_PASSWORD_FILE:-} || ! -s $RESTIC_PASSWORD_FILE ]]; then
+  log_note "RESTIC_PASSWORD_FILE is unset or empty"
+  printf 'Fatal: Please specify repository password\n' >&2
+  exit 1
+fi
+fault "restic-$sub"
+if [[ $sub != cat && $sub != init && ! -f $store/config ]]; then
+  printf 'Fatal: repository does not exist: unable to open config file\n' >&2
+  exit 10
+fi
+case $sub in
+  cat)
+    [[ -f $store/config ]] || { printf 'Fatal: repository does not exist: unable to open config file\n' >&2; exit 10; }
+    cat "$store/config"
+    ;;
+  init)
+    mkdir -p "$store/snapshots"
+    printf 'repo=%s\n' "$repo" >"$store/config"
+    log_note "made $store for $repo"
+    printf 'created restic repository at %s\n' "$repo"
+    ;;
+  unlock) ;;
+  backup)
+    cmd=()
+    seen=
+    for a in ${rest[@]+"${rest[@]}"}; do
+      if [[ -n $seen ]]; then cmd+=("$a"); elif [[ $a == -- ]]; then seen=1; fi
+    done
+    ((${#cmd[@]})) || { printf 'Fatal: no --stdin-from-command command\n' >&2; exit 1; }
+    n=$(find "$store/snapshots" -name '*.tar' | wc -l | tr -d ' ')
+    out=$store/snapshots/$(printf '%03d' $((n + 1))).tar
+    "${cmd[@]}" >"$out.part"
+    rc=$?
+    if ((rc != 0)); then
+      rm -f "$out.part"
+      log_note "the stdin command exited $rc; no snapshot"
+      printf 'Fatal: command exited with status %s\n' "$rc" >&2
+      exit 1
+    fi
+    mv "$out.part" "$out"
+    log_note "snapshot $out ($(wc -c <"$out" | tr -d ' ') bytes)"
+    ;;
+  check) log_note "check ${rest[*]-}" ;;
+  *)
+    log_note "unknown subcommand $sub"
+    exit 1
+    ;;
+esac
+exit 0

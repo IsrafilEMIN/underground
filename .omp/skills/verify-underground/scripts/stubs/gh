@@ -1,0 +1,9 @@
+# gh: `gh pr list` prints $base/fixtures/gh-pr-list ("<number> <head-branch>" lines, the
+# output of agent-start's --jq); fault: gh. Everything else is refused.
+fault gh
+if [[ ${1:-} == pr && ${2:-} == list ]]; then
+  [[ ! -f $base/fixtures/gh-pr-list ]] || cat "$base/fixtures/gh-pr-list"
+  exit 0
+fi
+log_note "refused: only gh pr list runs in the stand-in"
+exit 1

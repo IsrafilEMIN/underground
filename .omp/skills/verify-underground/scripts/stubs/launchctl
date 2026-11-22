@@ -1,0 +1,9 @@
+# launchctl: `print` answers "not loaded" (exit 113) unless `ugv fault RUN launchctl-print RC`; all else is refused.
+fault launchctl
+if [[ ${1:-} == print ]]; then
+  fault launchctl-print
+  log_note "not loaded in the stand-in"
+  exit 113
+fi
+log_note "refused: launchctl ${1:-} would change the real launchd"
+exit 1

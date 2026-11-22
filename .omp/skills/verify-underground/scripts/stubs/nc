@@ -1,0 +1,4 @@
+# nc: every port probe answers unless `ugv fault RUN nc 1`.
+fault nc
+log_note "port answers (stand-in)"
+exit 0
