@@ -1,7 +1,7 @@
 # omp: answers `config list --json` from $base/fixtures/omp-config.json and `config get` with
-# "(not set)" (fault: omp-config). A session or `-p` call records its environment, prints the
-# notices the ug-notices.ts extension would show, and for `-p` prints $base/fixtures/omp-answer.md
-# (fault: omp).
+# "(not set)" (fault: omp-config), and `plugin list --json` from $base/fixtures/omp-plugins.json
+# (fault: omp-plugins). A session or `-p` call records its environment, prints the notices the
+# ug-notices.ts extension would show, and for `-p` prints $base/fixtures/omp-answer.md (fault: omp).
 if [[ ${1:-} == config ]]; then
   fault omp-config
   case ${2:-} in
@@ -9,6 +9,12 @@ if [[ ${1:-} == config ]]; then
     get) printf '(not set)\n' ;;
     *) exit 1 ;;
   esac
+  exit 0
+fi
+if [[ ${1:-} == plugin ]]; then
+  fault omp-plugins
+  [[ ${2:-} == list ]] || exit 1
+  cat "$base/fixtures/omp-plugins.json"
   exit 0
 fi
 log_note "HOME=$HOME"

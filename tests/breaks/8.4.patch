@@ -1,7 +1,7 @@
 diff --git a/host/agent/agent-check b/host/agent/agent-check
 --- a/host/agent/agent-check
 +++ b/host/agent/agent-check
-@@ -43,7 +43,6 @@
+@@ -76,7 +76,6 @@
    exit 0
  }
  

@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-check b/host/agent/agent-check
+--- a/host/agent/agent-check
++++ b/host/agent/agent-check
+@@ -53,7 +53,7 @@
+   ((${#skills[@]})) || return 0
+   command -v omp >/dev/null 2>&1 || { plugins_unreadable 'omp is not on PATH'; return 0; }
+   command -v jq >/dev/null 2>&1 || { plugins_unreadable 'jq is not on PATH'; return 0; }
+-  plugins=$(omp plugin list --json 2>/dev/null) || { plugins_unreadable 'omp plugin list failed'; return 0; }
++  plugins=$(omp plugin list --json 2>/dev/null) || plugins='{}'
+   paths=$(jq -r '
+     if type != "object" then error("not an object") else . end
+     | (.marketplace // [])[] | (.entries // [])[]

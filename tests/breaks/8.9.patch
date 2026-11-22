@@ -1,7 +1,7 @@
 diff --git a/host/agent/agent-check b/host/agent/agent-check
 --- a/host/agent/agent-check
 +++ b/host/agent/agent-check
-@@ -14,7 +14,6 @@
+@@ -15,7 +15,6 @@
    exit 64
  fi
  self_dir=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
