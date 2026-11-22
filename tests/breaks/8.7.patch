@@ -1,10 +1,10 @@
 diff --git a/host/requirements b/host/requirements
 --- a/host/requirements
 +++ b/host/requirements
-@@ -3,6 +3,5 @@
+@@ -2,6 +2,5 @@
+ setting mnemopi.scoping=global: the dream reads one shared memory bank, not one bank per project
  setting mnemopi.autoRetain=false: the agent retains memories on purpose, so the dream reviews those and not a copy of every turn
- setting mnemopi.noEmbeddings=true: underground runs mnemopi without an embedding model, so recall uses full-text search only
+-setting mnemopi.noEmbeddings=true: underground runs mnemopi without an embedding model, so recall uses full-text search only
  setting skills.enabled=true: the review flow loads the dream-review skill when the user says 'review the dream'
--setting worktree.onStart=create: agent-start hard-resets the main checkout of each repo, so the agent must work in a linked worktree
  file .omp/agent/skills/dream-review/SKILL.md: the review flow loads this skill when the user says 'review the dream'
  file .omp/agent/extensions/underground-guard.ts: this extension blocks destructive commands of the agent
