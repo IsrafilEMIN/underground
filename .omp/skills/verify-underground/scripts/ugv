@@ -152,7 +152,6 @@ cmd_up() {
     mkdir -p "$(dirname "$home/$f")"
     printf '# ugv scaffolding: stands in for the agent-config file %s\n' "$f" >"$home/$f"
   done < <(sed -n -e 's/^file \([^:]*\):.*/\1/p' -e 's|^skill \([^:/]*\):.*|.omp/agent/skills/\1/SKILL.md|p' "$reqs")
-  # no omp plugins: every skill line is met from the user skills dir above
   printf '{"npm":[],"marketplace":[]}\n' >"$base/fixtures/omp-plugins.json"
   {
     printf '{'
