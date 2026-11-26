@@ -1,0 +1,12 @@
+diff --git a/host/bin/ug-backup b/host/bin/ug-backup
+--- a/host/bin/ug-backup
++++ b/host/bin/ug-backup
+@@ -93,7 +93,7 @@
+       fi
+       tmp=
+       [[ ! -d $status_dir ]] || tmp=$(mktemp "$status_dir/.backup-last.XXXXXX") || tmp=
+-      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$status_dir/backup-last"; then
++      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && chmod 644 "$tmp"; then
+         log "recorded the run in $status_dir/backup-last"
+       else
+         [[ -z $tmp ]] || rm -f "$tmp"

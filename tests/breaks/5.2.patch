@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -213,7 +213,7 @@
+   fi
+   now=$(date +%s)
+   if ((now - last > 172800)); then
+-    add_notice "the last good backup is $(((now - last) / 86400)) days old; $read_log"
++    add_notice "the last good backup is $(((now - last) / 3600)) days old; $read_log"
+   fi
+ }
+ 

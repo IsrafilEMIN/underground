@@ -1,8 +1,7 @@
 diff --git a/host/agent/agent-start b/host/agent/agent-start
-index 079781a..4ae4965 100755
 --- a/host/agent/agent-start
 +++ b/host/agent/agent-start
-@@ -160,7 +160,7 @@ sync_repo() {
+@@ -153,7 +153,7 @@
    local clone=$1 repo=$2
    cd "$clone" || return 0
    printf '%s %s\n' "$$" "$(date +%s)" >.git/ug-fetch.pid
@@ -10,4 +9,4 @@ index 079781a..4ae4965 100755
 +  /bin/bash -c "$(declare -f sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo)"'
      git fetch --quiet --no-tags --prune origin || exit 1
      base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
-     git reset -q --hard "$base" || exit 1
+     # The owner works in the main checkout too, so it moves only when it is detached or on the default branch with no changes.

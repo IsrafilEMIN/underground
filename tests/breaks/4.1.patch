@@ -1,13 +1,12 @@
 diff --git a/host/bin/ug-backup b/host/bin/ug-backup
-index 4aa1563..7c9c954 100755
 --- a/host/bin/ug-backup
 +++ b/host/bin/ug-backup
-@@ -81,7 +81,7 @@ else
-     else
+@@ -84,7 +84,7 @@ else
        log "checked data subset $subset/100 of $repo"
+       now=$(date +%s)
        tmp=$(mktemp "$backup/.last.XXXXXX") || tmp=
--      if [[ -n $tmp ]] && date +%s >"$tmp" && mv -f "$tmp" "$backup/last"; then
-+      if [[ -n $tmp ]] && date +%s >"$tmp" && rm -f "$tmp"; then
+-      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && mv -f "$tmp" "$backup/last"; then
++      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && rm -f "$tmp"; then
          log "recorded the run in $backup/last"
        else
          [[ -z $tmp ]] || rm -f "$tmp"

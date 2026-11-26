@@ -1,12 +1,11 @@
 diff --git a/host/bin/ug-backup b/host/bin/ug-backup
-index 4aa1563..e1062e0 100755
 --- a/host/bin/ug-backup
 +++ b/host/bin/ug-backup
-@@ -78,6 +78,7 @@ else
+@@ -80,6 +80,7 @@
      err=$("$restic_bin" -r "$repo" check --read-data-subset=$subset/100 2>&1 >/dev/null) || status=$?
      if [[ $status -ne 0 ]]; then
        log "checking the repo $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }"
 +      date +%s >"$backup/last"
      else
        log "checked data subset $subset/100 of $repo"
-       tmp=$(mktemp "$backup/.last.XXXXXX") || tmp=
+       now=$(date +%s)

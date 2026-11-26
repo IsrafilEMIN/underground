@@ -19,8 +19,10 @@ dream_fixture() {
   dr_sessions=$dr_home/.omp/agent/sessions/-work-acme-widget
   dr_calls=$UG_TMPDIR/calls
   dr_log=$dr_root/logs/agent-dream.log
-  mkdir -p "$dr_root/code/bin" "$dr_root/logs" "$dr_sessions" "$dr_calls" || fail 'cannot make the fixture dirs'
+  mkdir -p "$dr_root/code/bin" "$dr_root/logs" "$dr_root/status" "$dr_sessions" "$dr_calls" || fail 'cannot make the fixture dirs'
   printf 'gateway-secret\n' >"$dr_root/gateway-token"
+  # A fresh backup keeps the backup notice out of the dream notices.
+  date +%s >"$dr_root/status/backup-last"
   : >"$dr_root/code/ug-notices.ts"
   cp "$UG_REPO_ROOT/host/agent/dream-prompt.md" "$dr_root/code/dream-prompt.md" || fail 'cannot copy the dream prompt'
   for name in agent-env agent-start agent-dream; do

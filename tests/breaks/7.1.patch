@@ -1,12 +1,11 @@
 diff --git a/host/agent/agent-start b/host/agent/agent-start
-index 079781a..3349f87 100755
 --- a/host/agent/agent-start
 +++ b/host/agent/agent-start
-@@ -163,7 +163,6 @@ sync_repo() {
-   /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c "$(declare -f sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo)"'
-     git fetch --quiet --no-tags --prune origin || exit 1
-     base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
--    git reset -q --hard "$base" || exit 1
+@@ -165,7 +165,6 @@
+       printf "the main checkout of %s has uncommitted changes, so it did not move to %s\n" "$1" "$base" >.git/ug-reset.summary
+     else
+       rm -f .git/ug-reset.summary
+-      git reset -q --hard "$base" || exit 1
+     fi
      sweep_repo "$1" "$base"
      exit 0
-   ' _ "$repo"
