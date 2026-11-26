@@ -8,4 +8,5 @@ ug_agent_env agent-tern || exit 1
 
 # Tern gives its shells a bare environment, so only the zsh files in ZDOTDIR can load agent-env and put session-bin, where omp runs agent-start, first.
 export SHELL=/bin/zsh ZDOTDIR=$code/zsh
-exec "@TERN@" remote serve --user --listen 127.0.0.1:@AGENT_TERN_PORT@ --state-dir "$root/tern-remote" --authorized-keys "$code/authorized_keys/@AGENT_USER@" --relay none
+# It listens on every address so the owner's phone reaches it over Tailscale; code/pf.conf drops UDP to this port from anywhere but loopback and the tailnet.
+exec "@TERN@" remote serve --user --listen 0.0.0.0:@AGENT_TERN_PORT@ --state-dir "$root/tern-remote" --authorized-keys "$code/authorized_keys/@AGENT_USER@" --relay none
