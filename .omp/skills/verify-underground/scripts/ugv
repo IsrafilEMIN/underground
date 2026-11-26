@@ -2,9 +2,9 @@
 # ugv: build, drive and tear down a stand-in Underground host for verification.
 # It copies this worktree into /tmp/ugv-<run>, renders host/agent/* into a
 # scratch root exactly as host/bin/ug-agent-setup lays it out, and puts stubs
-# for the production boundaries (sudo, launchctl, ssh, nc, restic, omp, gh)
-# first on PATH. The real /Library/Underground, real launchd and the real
-# users are never touched. Run `ugv help` for usage.
+# for the production boundaries (sudo, launchctl, the backup host's ssh, nc,
+# restic, omp, gh) first on PATH. The real /Library/Underground, real launchd,
+# Tern and the real users are never touched. Run `ugv help` for usage.
 set -euo pipefail
 
 self=${BASH_SOURCE[0]}
@@ -30,9 +30,9 @@ usage:
   ugv up [RUN]                         build a stand-in host; prints base and evidence dirs
   ugv doctor RUN                       read-only check that RUN is worth driving
   ugv owner RUN [opts] -- CMD...       run CMD as the owner (HOME=owner-home, stubs first on PATH)
-  ugv agent RUN [opts] -- CMD...       run CMD as the agent, as the agent sshd or launchd would
+  ugv agent RUN [opts] -- CMD...       run CMD as the agent, as a Tern shell or launchd would
   ugv look RUN LABEL -- CMD...         capture a read-only observation (cwd = base, plain env)
-  ugv repo RUN OWNER/NAME              make an owner checkout + agent clone with a local origin
+  ugv repo RUN OWNER/NAME              make an agent clone ~/work/OWNER/NAME with a GitHub origin served offline
   ugv git RUN -- GIT-ARGS...           git with an isolated config and identity (cwd = base)
   ugv fault RUN NAME RC|clear          make a stub exit RC (see the skill for NAME values)
   ugv calls RUN [STUB]                 print stub call logs
@@ -107,33 +107,38 @@ cmd_up() {
     write_stub "$f" "$(cat "$skill_dir/scripts/stubs/$f")"
   done
 
-  # 3. agent root, laid out like host/bin/ug-agent-setup:240-258
-  mkdir -p "$code/bin" "$code/usage-broker" "$code/authorized_keys" "$root/logs" "$base/meta/rendered"
+  # 3. agent root, laid out like host/bin/ug-agent-setup (agent code); Tern itself is not laid out
+  mkdir -p "$code/bin" "$code/session-bin" "$code/zsh" "$code/usage-broker" "$code/authorized_keys" "$root/logs" "$root/status" "$base/meta/rendered"
   printf 'verify-gateway-token\n' >"$root/gateway-token"
   (
     # shellcheck source=/dev/null
     source "$base/src/host/lib/ug.bash"
     # shellcheck source=/dev/null
     source "$base/src/host/lib/services.bash"
-    for f in agent-session agent-start agent-env agent-dream sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
-      out=$(ug_render "$base/meta/rendered/$f" "$base/src/host/agent/$f" "host/agent/$f") || { printf '%s\n' "$out" >&2; exit 1; }
+    for f in agent-start agent-env agent-dream agent-home-tar agent-unpack agent-pf.conf agent-pf-load zsh/zshenv zsh/zshrc; do
+      out=$(ug_render "$base/meta/rendered/${f##*/}" "$base/src/host/agent/$f" "host/agent/$f") || { printf '%s\n' "$out" >&2; exit 1; }
     done
+    # agent-tern is rendered to prove the template, never run: Tern is not in the stand-in.
+    out=$(ug_render "$base/meta/rendered/agent-tern" "$base/src/host/agent/agent-tern" host/agent/agent-tern -e "s|@TERN@|$code/bin/tern|g") || { printf '%s\n' "$out" >&2; exit 1; }
   ) || die 'rendering host/agent templates failed'
   ln -s "$base/stubs/omp" "$code/bin/omp"
+  ln -s "$code/agent-start" "$code/session-bin/omp"
   install -m 555 "$base/stubs/gh" "$base/stubs/gh-app-token" "$code/bin/"
   install -m 555 "$base/meta/rendered/agent-home-tar" "$base/meta/rendered/agent-unpack" "$base/src/host/agent/agent-check" "$code/bin/"
   install -m 444 "$base/src"/host/usage-broker/*.ts "$code/usage-broker/"
-  install -m 444 "$base/src/host/facts" "$base/meta/rendered/sshd_config" "$code/"
+  install -m 444 "$base/src/host/facts" "$code/"
   install -m 444 "$base/src/host/agent/ug-notices.ts" "$base/src/host/agent/dream-prompt.md" "$base/meta/rendered/agent-env" "$code/"
   install -m 444 "$base/src/host/requirements" "$code/requirements"
-  install -m 555 "$base/meta/rendered/agent-session" "$base/meta/rendered/agent-start" "$base/meta/rendered/agent-dream" "$code/"
+  install -m 555 "$base/meta/rendered/agent-start" "$base/meta/rendered/agent-dream" "$base/meta/rendered/agent-tern" "$code/"
+  install -m 444 "$base/meta/rendered/zshenv" "$code/zsh/.zshenv"
+  install -m 444 "$base/src/host/agent/zsh/zprofile" "$code/zsh/.zprofile"
+  install -m 444 "$base/meta/rendered/zshrc" "$code/zsh/.zshrc"
 
-  # 4. owner home with the data dir host/bin/ug-setup would have written
-  mkdir -p "$data/agent-ssh" "$data/backup"
-  chmod 700 "$base/owner-home" "$data/agent-ssh"
-  key=$data/agent-ssh/id_ed25519
+  # 4. owner home with the data dir host/bin/ug-setup would have written; its ssh key is what Tern logs in with
+  mkdir -p "$base/owner-home/.ssh" "$data/backup"
+  chmod 700 "$base/owner-home" "$base/owner-home/.ssh"
+  key=$base/owner-home/.ssh/id_ed25519
   ssh-keygen -q -t ed25519 -N '' -C ugv-verify -f "$key"
-  printf '[127.0.0.1]:9 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHVndi12ZXJpZnktc3RhbmQtaW4taG9zdC1rZXk\n' >"$data/agent-ssh/known_hosts"
   cut -d ' ' -f 1,2 "$key.pub" >"$code/authorized_keys/ugagent"
   printf '# repo-path target (written by ugv up; empty means no sources)\n' >"$data/sources"
   openssl rand -hex 16 >"$data/backup/password"
@@ -145,7 +150,7 @@ cmd_up() {
   # 5. agent home that meets host/requirements (verification scaffolding)
   mkdir -p "$home/.omp/agent"
   chmod 700 "$home"
-  # agent-start clones https://github.com/<slug>.git; keep every agent git call offline
+  # agent-start fetches https://github.com/<slug>.git; keep every agent git call offline
   printf '[url "%s/origins/"]\n\tinsteadOf = https://github.com/\n' "$base" >"$home/.gitconfig"
   reqs=$base/src/host/requirements
   while IFS= read -r f; do
@@ -178,6 +183,10 @@ cmd_doctor() {
     problems+=("rendered code still names the real host: $(grep -rl '/Library/Underground\|/Users/ugagent' "$base/root/code" | tr '\n' ' ')")
   fi
   [[ $(readlink "$base/root/code/bin/omp" 2>/dev/null) == "$base/stubs/omp" ]] || problems+=("code/bin/omp is not the omp stub")
+  [[ $(readlink "$base/root/code/session-bin/omp" 2>/dev/null) == "$base/root/code/agent-start" ]] || problems+=("code/session-bin/omp does not point at code/agent-start")
+  for f in .zshenv .zprofile .zshrc; do
+    [[ -f $base/root/code/zsh/$f ]] || problems+=("code/zsh/$f is missing")
+  done
   for f in sudo launchctl ssh nc restic omp gh; do
     [[ -x $base/stubs/$f ]] || problems+=("stub $f is missing")
   done
@@ -316,18 +325,16 @@ cmd_git() {
 }
 
 cmd_repo() {
-  local run base evidence slug name origin seed owner_co agent_co
+  local run base evidence slug origin seed agent_co
   need_run "${1:-}"
   slug=${2:-}
   [[ $slug =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die 'usage: ugv repo RUN OWNER/NAME'
   need_base
-  name=${slug#*/}
   origin=$base/origins/$slug.git
   seed=$base/seeds/$slug
-  owner_co=$base/owner-home/code/$name
   agent_co=$base/agent-home/work/$slug
   [[ ! -e $origin ]] || die "$slug exists in $base/origins"
-  mkdir -p "$(dirname "$origin")" "$(dirname "$seed")" "$base/owner-home/code" "$(dirname "$agent_co")"
+  mkdir -p "$(dirname "$origin")" "$(dirname "$seed")" "$(dirname "$agent_co")"
   ugv_git init -q --bare -b main "$origin"
   ugv_git init -q -b main "$seed"
   printf '# %s\n\nseeded by ugv repo\n' "$slug" >"$seed/README.md"
@@ -335,12 +342,11 @@ cmd_repo() {
   ugv_git -C "$seed" commit -q -m 'seed: first commit'
   ugv_git -C "$seed" remote add origin "$origin"
   ugv_git -C "$seed" push -q origin main
-  ugv_git clone -q "$origin" "$owner_co"
-  ugv_git -C "$owner_co" remote set-url origin "https://github.com/$slug.git"
   ugv_git clone -q "$origin" "$agent_co"
-  ugv_git -C "$agent_co" checkout -q --detach origin/main
-  printf 'repo %s\n  origin (bare, local)  %s\n  seed (push here)      %s\n  owner checkout        %s  (origin url https://github.com/%s.git, never fetched)\n  agent clone           %s  (origin = the local bare repo)\n' \
-    "$slug" "$origin" "$seed" "$owner_co" "$slug" "$agent_co"
+  # the origin agent-start requires; agent-home/.gitconfig serves it from origins/
+  ugv_git -C "$agent_co" remote set-url origin "https://github.com/$slug.git"
+  printf 'repo %s\n  origin (bare, local)  %s\n  seed (push here)      %s\n  agent clone           %s  (on main; origin url https://github.com/%s.git, fetched from the bare repo)\n' \
+    "$slug" "$origin" "$seed" "$agent_co" "$slug"
 }
 
 cmd_fault() {
