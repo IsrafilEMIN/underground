@@ -54,10 +54,6 @@ trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
 
 ug_step tools
 install -d -m 700 "$data" "$data/restic"
-if [[ -e $data/gh ]]; then
-  rm -rf "$data/gh"
-  ug_say changed gh "removed the old staging folder $data/gh"
-fi
 [[ -d $bin_dir ]] || install -d -m 755 "$bin_dir"
 
 install_restic() {

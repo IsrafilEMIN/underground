@@ -397,17 +397,6 @@ mv -f "$tern_host_tmp" "$data/tern-host"
 ug_say ok "tern host" "127.0.0.1:$tern_port $tern_fp in $data/tern-host"
 
 ug_step "leftovers"
-old_omp=$owner_home/.local/bin/omp
-if [[ -L $old_omp && $(readlink "$old_omp") == "$data/agent/"* ]]; then
-  rm -f "$old_omp"
-  ug_say changed "$old_omp" "deleted; omp now runs in the Tern shell of $agent_user"
-fi
-for old in "$data/agent-ssh" "$data/agent"; do
-  [[ -e $old || -L $old ]] || continue
-  rm -rf "$old"
-  ug_say changed "${old##*/}" "deleted from $data; no longer used"
-done
-
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
