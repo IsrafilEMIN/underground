@@ -139,7 +139,7 @@ cmd_up() {
   chmod 700 "$base/owner-home" "$base/owner-home/.ssh"
   key=$base/owner-home/.ssh/id_ed25519
   ssh-keygen -q -t ed25519 -N '' -C ugv-verify -f "$key"
-  awk '$1 == "ssh-ed25519" { print $1, $2 }' "$key.pub" "$base/src/host/tern-keys" >"$code/authorized_keys/ugagent"
+  awk '$1 == "ssh-ed25519" || $1 == "ssh-rsa" || $1 ~ /^ecdsa-sha2-nistp(256|384|521)$/ { print $1, $2 }' "$key.pub" "$base/src/host/tern-keys" >"$code/authorized_keys/ugagent"
   printf '# repo-path target (written by ugv up; empty means no sources)\n' >"$data/sources"
   openssl rand -hex 16 >"$data/backup/password"
   printf 'repo=sftp:verify@backup.invalid:/ugv-%s\n' "$run" >"$data/backup/config"

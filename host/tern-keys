@@ -1,3 +1,1 @@
-# Public keys of the owner's other Tern devices, one per line. host/bin/ug-agent-setup adds them to the
-# keys of the agent's Tern host, next to the owner's ~/.ssh/id_*.pub. The Tern app on a device shows its key.
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtfqU2vVXJi2t0+9Tfa4q31WxbR8vtRb/YzhNLwnnEz kutluk iphone tern
