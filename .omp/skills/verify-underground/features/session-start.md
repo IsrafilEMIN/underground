@@ -1,6 +1,6 @@
 # Start an agent session
 
-The owner opens the agent's shell in his Tern app (remote host `ugagent@127.0.0.1:18376`, served by the `com.underground.agent-tern` daemon) and types `omp`. The Tern shell's zsh files (`code/zsh`) load the agent environment and put `code/session-bin` first on `PATH`, so `omp` is `code/session-bin/omp`, a link to `code/agent-start`. `agent-start` never changes the folder: omp starts where the owner typed it. Before omp opens, it adds warning notices for a missing or old backup (from `root/status/backup-last`), a pending or failed nightly dream, agent-check findings, a failed background fetch, a main checkout that did not move, and cleanup items it kept. When the folder belongs to a clone at `~/work/<owner>/<name>` (its main checkout or a linked worktree) whose origin is `https://github.com/<owner>/<name>(.git)`, it also syncs that clone in the background: the main checkout moves to origin's default branch only when it is detached or on the default branch with no tracked changes, `.git/ug-fetch.status` records `ok <epoch>` or `failed <epoch>`, and idle worktrees and branches that origin already holds are removed. Any other folder starts omp with no sync and no clone.
+The owner opens the agent's shell in his Tern app (remote host `ugagent@<mac tailscale ip>:18376`, served by the `com.underground.agent-tern` daemon) and types `omp`. The Tern shell's zsh files (`code/zsh`) load the agent environment and put `code/session-bin` first on `PATH`, so `omp` is `code/session-bin/omp`, a link to `code/agent-start`. `agent-start` never changes the folder: omp starts where the owner typed it. Before omp opens, it adds warning notices for a missing or old backup (from `root/status/backup-last`), a pending or failed nightly dream, agent-check findings, a failed background fetch, a main checkout that did not move, and cleanup items it kept. When the folder belongs to a clone at `~/work/<owner>/<name>` (its main checkout or a linked worktree) whose origin is `https://github.com/<owner>/<name>(.git)`, it also syncs that clone in the background: the main checkout moves to origin's default branch only when it is detached or on the default branch with no tracked changes, `.git/ug-fetch.status` records `ok <epoch>` or `failed <epoch>`, and idle worktrees and branches that origin already holds are removed. Any other folder starts omp with no sync and no clone.
 
 ## Sub-features
 
@@ -22,7 +22,7 @@ The owner opens the agent's shell in his Tern app (remote host `ugagent@127.0.0.
 
 ## How to get to it (user POV)
 
-- The owner adds the remote host `ugagent@127.0.0.1:18376` in Tern (once; `host/bin/ug-setup` trusts its host key), or `ugagent@<mac tailscale ip>:18376` on his phone, opens its shell, `cd`s to a folder and types `omp [ARGS...]`.
+- The owner adds the remote host `ugagent@<mac tailscale ip>:18376` in Tern on the mac and the phone (once; `host/bin/ug-setup` trusts its host key on the mac), opens its shell, `cd`s to a folder and types `omp [ARGS...]`.
 - In the stand-in, play the Tern shell as the agent: `$U agent "$RUN" --cwd <folder under $B> -- code/session-bin/omp [ARGS...]`. For the zsh path itself, run `/bin/zsh -i -c 'omp ...'` with `ZDOTDIR` set to the stand-in's `root/code/zsh`, as `code/agent-tern` sets it.
 
 ## Driving it with ugv
