@@ -1,0 +1,11 @@
+#!/bin/bash
+set -eo pipefail
+
+root=@ROOT@
+code=$root/code
+source "$code/agent-env" || { printf 'agent-tern: cannot read %s/agent-env; the owner runs host/bin/ug-agent-setup\n' "$code" >&2; exit 1; }
+ug_agent_env agent-tern || exit 1
+
+# Tern gives its shells a bare environment, so only the zsh files in ZDOTDIR can load agent-env and put session-bin, where omp runs agent-start, first.
+export SHELL=/bin/zsh ZDOTDIR=$code/zsh
+exec "@TERN@" remote serve --user --listen 127.0.0.1:@AGENT_TERN_PORT@ --state-dir "$root/tern-remote" --authorized-keys "$code/authorized_keys/@AGENT_USER@" --relay none

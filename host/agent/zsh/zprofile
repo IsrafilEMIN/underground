@@ -1,0 +1,2 @@
+# zsh reads this from ZDOTDIR in place of the agent's own ~/.zprofile.
+[[ ! -r $HOME/.zprofile ]] || source "$HOME/.zprofile"

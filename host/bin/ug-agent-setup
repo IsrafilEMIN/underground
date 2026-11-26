@@ -92,11 +92,7 @@ agent_user=$(ug_fact agent_user)
 agent_home=$(ug_fact agent_home)
 auth_user=$(ug_fact auth_user)
 auth_home=$(ug_fact auth_home)
-agent_port=$(ug_fact agent_sshd_port)
-bin_dir=$owner_home/.local/bin
-key_dir=$data/agent-ssh
-owner_key=$key_dir/id_ed25519
-known_hosts=$key_dir/known_hosts
+tern_port=$(ug_fact agent_tern_port)
 ip_port='^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$'
 omp_pin=$(ug_pin_checked "$src/VERSIONS" omp '^[0-9A-Za-z.+-]+$' ug-agent-setup)
 omp_sha=$(ug_pin_checked "$src/VERSIONS" omp_sha256 '^[0-9a-f]{64}$' ug-agent-setup)
@@ -104,6 +100,8 @@ omp_release=$(ug_pin_checked "$src/VERSIONS" omp_release '^https://github\.com/[
 gh_pin=$(ug_pin_checked "$src/VERSIONS" gh '^[0-9A-Za-z.+-]+$' ug-agent-setup)
 gh_zip_sha=$(ug_pin_checked "$src/VERSIONS" gh_zip_sha256 '^[0-9a-f]{64}$' ug-agent-setup)
 gh_release=$(ug_pin_checked "$src/VERSIONS" gh_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download$' ug-agent-setup)
+tern_app=$(ug_pin_checked "$src/VERSIONS" tern_app '^/Applications/[A-Za-z0-9 ._-]+\.app$' ug-agent-setup)
+tern_team=$(ug_pin_checked "$src/VERSIONS" tern_team '^[A-Z0-9]{10}$' ug-agent-setup)
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -145,7 +143,7 @@ make_user() {
   ug_say ok "user $name" "standard, hidden, shell $shell, home mode 700"
 }
 
-make_user "$agent_user" "Underground agent" /bin/sh "$agent_home"
+make_user "$agent_user" "Underground agent" /bin/zsh "$agent_home"
 make_user "$auth_user" "Underground logins" /usr/bin/false "$auth_home"
 
 ug_step "agent tools"
@@ -174,6 +172,35 @@ for old in "$root"/gh/*; do
   [[ $old == "$gh_dir" ]] || rm -rf "$old"
 done
 ug_say ok "gh" "$gh_pin installed, old versions removed"
+
+[[ -d $tern_app ]] || ug_die ug-agent-setup "no $tern_app; install Tern.app into /Applications, then run host/bin/ug-setup"
+tern_req="anchor apple generic and certificate leaf[subject.OU] = \"$tern_team\""
+codesign --verify --strict -R="$tern_req" "$tern_app" 2>/dev/null ||
+  ug_die ug-agent-setup "$tern_app does not carry a valid signature of team $tern_team; install Tern.app again, then run host/bin/ug-setup"
+tern_ver=$( (cd / && ug_as "$agent_user" "$tern_app/Contents/MacOS/tern" --version) 2>/dev/null) || tern_ver=""
+tern_ver=$(sed -n 's/^tern \([0-9A-Za-z.+-]*\) (\([0-9a-f]*\))$/\1-\2/p' <<<"$tern_ver")
+[[ $tern_ver =~ ^[0-9A-Za-z.+-]+$ ]] || ug_die ug-agent-setup "$tern_app/Contents/MacOS/tern --version does not print tern <version> (<commit>)"
+# A lone copy of the tern binary fails codesign and macOS kills it, so the whole signed bundle is copied.
+tern_dir=$root/tern/$tern_ver
+tern_bundle=$tern_dir/Tern.app
+tern_bin=$tern_bundle/Contents/MacOS/tern
+install -d -m 755 -o root -g wheel "$root/tern"
+if ! codesign --verify --strict -R="$tern_req" "$tern_bundle" 2>/dev/null; then
+  rm -rf "$tern_dir"
+  install -d -m 755 -o root -g wheel "$tern_dir"
+  tern_tmp=$(mktemp -d "$tern_dir/.Tern.XXXXXX")
+  cleanup+=("$tern_tmp")
+  ditto "$tern_app" "$tern_tmp/Tern.app"
+  chown -R root:wheel "$tern_tmp/Tern.app"
+  chmod -R a-w "$tern_tmp/Tern.app"
+  codesign --verify --strict -R="$tern_req" "$tern_tmp/Tern.app" 2>/dev/null ||
+    ug_die ug-agent-setup "the copy of $tern_app in $tern_tmp fails its signature check; nothing changed"
+  mv "$tern_tmp/Tern.app" "$tern_bundle"
+fi
+for old in "$root"/tern/*; do
+  [[ $old == "$tern_dir" ]] || rm -rf "$old"
+done
+ug_say ok "tern" "$tern_ver copied from $tern_app, old versions removed"
 
 rendered_dir=$(mktemp -d)
 cleanup+=("$rendered_dir")
@@ -207,61 +234,81 @@ if [[ ! -f $gh_app_dir/github-app.json || ! -f $gh_app_dir/github-app.pem ]]; th
   ug_say warn "github app" "no key yet; put the app key in $data/github-app.pem and {\"client_id\":\"<id>\",\"installation_id\":<n>} in $data/github-app.json, then run host/bin/ug-setup"
 fi
 
-if [[ ! -f $root/ssh_host_ed25519_key ]]; then
-  ssh-keygen -q -t ed25519 -N '' -f "$root/ssh_host_ed25519_key"
-fi
-chown root:wheel "$root/ssh_host_ed25519_key" "$root/ssh_host_ed25519_key.pub"
-chmod 600 "$root/ssh_host_ed25519_key"
-chmod 644 "$root/ssh_host_ed25519_key.pub"
-ug_say ok "sshd host key" "$root/ssh_host_ed25519_key"
+tern_state=$root/tern-remote
+install -d -m 700 -o "$agent_user" -g staff "$tern_state"
+ug_ensure_owner_mode "$tern_state" "$agent_user:staff" 0700 ||
+  ug_die ug-agent-setup "cannot make $tern_state $agent_user mode 0700"
+install -d -m 755 -o "$owner" -g staff "$root/status"
+ug_ensure_owner_mode "$root/status" "$owner:staff" 0755 ||
+  ug_die ug-agent-setup "cannot make $root/status $owner mode 0755"
 
 deny=/etc/ssh/sshd_config.d/010-underground-deny-ugagent.conf
-deny_tmp=$(mktemp)
-cleanup+=("$deny_tmp")
-printf 'DenyUsers %s\n' "$agent_user" >"$deny_tmp"
-install -m 444 -o root -g wheel "$deny_tmp" "$deny"
-ug_sshd_denies_agent /etc/ssh/sshd_config "$root/ssh_host_ed25519_key" ||
+deny_dir=$(mktemp -d)
+cleanup+=("$deny_dir")
+printf 'DenyUsers %s\n' "$agent_user" >"$deny_dir/deny"
+install -m 444 -o root -g wheel "$deny_dir/deny" "$deny"
+ssh-keygen -q -t ed25519 -N '' -f "$deny_dir/host_key"
+ug_sshd_denies_agent /etc/ssh/sshd_config "$deny_dir/host_key" ||
   ug_die ug-agent-setup "system sshd does not deny $agent_user despite $deny; keep Remote Login off"
 ug_say ok "system sshd" "denies $agent_user"
 
 [[ -d $data ]] || ug_die ug-agent-setup "$data is missing; run host/bin/ug-setup first"
-install -d -m 700 -o "$owner" -g staff "$key_dir"
-if [[ ! -f $owner_key ]]; then
-  ssh-keygen -q -t ed25519 -N '' -C ug-agent -f "$owner_key"
-fi
-chown "$owner" "$owner_key" "$owner_key.pub"
-chmod 600 "$owner_key"
-ug_say ok "owner key" "$owner_key"
 
 ug_step "agent code"
 engine=$(sed -n 's/^engine=//p' "$data/addresses" 2>/dev/null) || true
 [[ $engine =~ $ip_port ]] || ug_die ug-agent-setup "$data/addresses needs an engine=<ip>:<port> line"
 
-for name in agent-session agent-start agent-env agent-dream sshd_config agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
+for name in agent-start agent-env agent-dream agent-home-tar agent-unpack agent-pf.conf agent-pf-load; do
   render "host/agent/$name"
 done
+render "host/agent/agent-tern" -e "s|@TERN@|$tern_bin|g"
+render "host/agent/zsh/zshenv"
+render "host/agent/zsh/zshrc"
 render "host/agent/gh-app-token"
 render "host/agent/gh" -e "s|@GH@|$gh_bin|g"
 pfctl -n -f "$rendered_dir/agent-pf.conf" >/dev/null 2>&1 || ug_die ug-agent-setup "pfctl rejects host/agent/agent-pf.conf; installed code unchanged"
 rm -rf "$code.new" "$code.old"
-install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/usage-broker" "$code.new/authorized_keys"
+install -d -m 755 -o root -g wheel "$code.new" "$code.new/bin" "$code.new/session-bin" "$code.new/zsh" "$code.new/usage-broker" "$code.new/authorized_keys"
 ln -s "$omp_bin" "$code.new/bin/omp"
+ln -s "$tern_bin" "$code.new/bin/tern"
+ln -s "$code/agent-start" "$code.new/session-bin/omp"
 install -m 555 -o root -g wheel "$rendered_dir/gh-app-token" "$rendered_dir/gh" "$code.new/bin/"
 install -m 555 -o root -g wheel "$rendered_dir/agent-home-tar" "$rendered_dir/agent-unpack" "$src/host/agent/agent-check" "$code.new/bin/"
 install -m 444 -o root -g wheel "$src"/host/usage-broker/*.ts "$code.new/usage-broker/"
-install -m 444 -o root -g wheel "$src/host/facts" "$rendered_dir/sshd_config" "$code.new/"
+install -m 444 -o root -g wheel "$src/host/facts" "$code.new/"
 install -m 444 -o root -g wheel "$src/host/agent/ug-notices.ts" "$src/host/agent/dream-prompt.md" "$rendered_dir/agent-env" "$code.new/"
 install -m 444 -o root -g wheel "$src/host/requirements" "$code.new/requirements"
 install -m 444 -o root -g wheel "$rendered_dir/agent-pf.conf" "$code.new/pf.conf"
 install -m 555 -o root -g wheel "$rendered_dir/agent-pf-load" "$code.new/pf-load"
-install -m 555 -o root -g wheel "$rendered_dir/agent-session" "$rendered_dir/agent-start" "$rendered_dir/agent-dream" "$code.new/"
-cut -d ' ' -f 1,2 "$owner_key.pub" >"$code.new/authorized_keys/$agent_user"
+install -m 555 -o root -g wheel "$rendered_dir/agent-start" "$rendered_dir/agent-dream" "$rendered_dir/agent-tern" "$code.new/"
+install -m 444 -o root -g wheel "$rendered_dir/zshenv" "$code.new/zsh/.zshenv"
+install -m 444 -o root -g wheel "$src/host/agent/zsh/zprofile" "$code.new/zsh/.zprofile"
+install -m 444 -o root -g wheel "$rendered_dir/zshrc" "$code.new/zsh/.zshrc"
+tern_keys=$code.new/authorized_keys/$agent_user
+: >"$tern_keys"
+for pub in "$owner_home"/.ssh/id_*.pub; do
+  [[ -f $pub && ! -L $pub ]] || continue
+  awk '$1 == "ssh-ed25519" || $1 == "ssh-rsa" || $1 ~ /^ecdsa-sha2-nistp(256|384|521)$/ { print $1, $2 }' "$pub" >>"$tern_keys"
+done
 chown -hR root:wheel "$code.new"
-chmod 444 "$code.new/authorized_keys/$agent_user"
+chmod 444 "$tern_keys"
+tern_key_count=$(wc -l <"$tern_keys" | tr -d ' ')
 [[ ! -e $code ]] || mv "$code" "$code.old"
 mv "$code.new" "$code"
 rm -rf "$code.old"
 ug_say ok "agent code" "rebuilt in $code"
+if [[ $tern_key_count -eq 0 ]]; then
+  ug_say warn "tern keys" "no ed25519, ecdsa or rsa key in $owner_home/.ssh/id_*.pub, so Tern cannot log in as $agent_user; run: ssh-keygen -t ed25519, then host/bin/ug-setup"
+else
+  ug_say ok "tern keys" "$tern_key_count keys from $owner_home/.ssh in $code/authorized_keys/$agent_user"
+fi
+
+sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
+cleanup+=("$sudoers_tmp")
+printf '%s ALL=(%s) NOPASSWD: %s, %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" "$code/bin/agent-check" >"$sudoers_tmp"
+visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "visudo rejects the sudoers rules for the agent helpers; nothing installed"
+install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
+ug_say ok "sudoers" "$owner may run the agent helpers as $agent_user"
 
 app_repos=$data/app-repos
 app_tmp=$(mktemp "$data/.app-repos.XXXXXX") || ug_die ug-agent-setup "cannot make a temp file for $app_repos"
@@ -275,12 +322,6 @@ if app_list=$( (cd / && ug_as "$agent_user" "$code/bin/gh" api installation/repo
 else
   ug_say warn "app repos" "cannot list them (no app key, or GitHub does not answer); kept $app_repos"
 fi
-
-host_key=$(cut -d ' ' -f 1,2 "$root/ssh_host_ed25519_key.pub")
-printf '[127.0.0.1]:%s %s\n' "$agent_port" "$host_key" >"$known_hosts.tmp"
-install -m 600 -o "$owner" -g staff "$known_hosts.tmp" "$known_hosts"
-rm -f "$known_hosts.tmp"
-ug_say ok "known_hosts" "127.0.0.1:$agent_port in $known_hosts"
 
 ug_step "gateway"
 ug_as "$auth_user" install -d -m 700 "$auth_home/.omp"
@@ -299,7 +340,6 @@ mv -f "$token_tmp" "$root/gateway-token"
 ug_say ok "agent bearer" "$root/gateway-token, $agent_user mode 0400"
 
 ug_step "daemons"
-/usr/sbin/sshd -t -f "$code/sshd_config" || ug_die ug-agent-setup "sshd rejects $code/sshd_config; nothing loaded"
 
 # shellcheck disable=SC2154
 start_services() {
@@ -343,32 +383,35 @@ ug_say ok "walls" "$agent_user and $auth_user cannot read your home or each othe
 retire_daemons
 start_services
 
-ug_step "launcher"
-agent_dir=$data/agent
-install -d -m 700 -o "$owner" -g staff "$agent_dir" "$agent_dir/bin" "$agent_dir/lib"
-[[ -d $bin_dir ]] || install -d -m 755 -o "$owner" -g staff "$bin_dir"
-install -m 555 -o "$owner" -g staff "$src/host/bin/ug-agent" "$agent_dir/bin/ug-agent"
-install -m 444 -o "$owner" -g staff "$src/host/lib/ug.bash" "$agent_dir/lib/ug.bash"
-install -m 444 -o "$owner" -g staff "$src/host/lib/services.bash" "$agent_dir/lib/services.bash"
-install -m 444 -o "$owner" -g staff "$src/host/lib/sources.bash" "$agent_dir/lib/sources.bash"
-install -m 444 -o "$owner" -g staff "$src/host/facts" "$agent_dir/facts"
-install -m 444 -o "$owner" -g staff "$src/host/services" "$agent_dir/services"
-[[ ! -e $bin_dir/omp || -L $bin_dir/omp ]] || ug_die ug-agent-setup "$bin_dir/omp is a file, not setup's link; move it away and run setup again"
-ln -sfn "$agent_dir/bin/ug-agent" "$bin_dir/omp"
-chown -h "$owner" "$bin_dir/omp"
-ug_say ok "omp on PATH" "$bin_dir/omp"
+ug_step "tern host"
+tern_key=$( (cd / && ug_as "$agent_user" "$code/bin/tern" remote host-key --state-dir "$tern_state") 2>&1) ||
+  ug_die ug-agent-setup "tern remote host-key failed: ${tern_key//$'\n'/; }"
+tern_fp=$(sed -n 's/.*"fingerprint":"\(SHA256:[A-Za-z0-9+/=]*\)".*/\1/p' <<<"$tern_key")
+[[ -n $tern_fp ]] || ug_die ug-agent-setup "tern remote host-key printed no fingerprint: ${tern_key//$'\n'/; }"
+tern_host_tmp=$(mktemp "$data/.tern-host.XXXXXX") || ug_die ug-agent-setup "cannot make a temp file for $data/tern-host"
+cleanup+=("$tern_host_tmp")
+printf '127.0.0.1:%s %s\n' "$tern_port" "$tern_fp" >"$tern_host_tmp"
+chown "$owner:staff" "$tern_host_tmp"
+chmod 600 "$tern_host_tmp"
+mv -f "$tern_host_tmp" "$data/tern-host"
+ug_say ok "tern host" "127.0.0.1:$tern_port $tern_fp in $data/tern-host"
 
-sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
-cleanup+=("$sudoers_tmp")
-printf '%s ALL=(%s) NOPASSWD: %s, %s, %s\n' "$owner" "$agent_user" "$code/bin/agent-home-tar" "$code/bin/agent-unpack" "$code/bin/agent-check" >"$sudoers_tmp"
-visudo -cf "$sudoers_tmp" >/dev/null || ug_die ug-agent-setup "visudo rejects the sudoers rules for the agent helpers; nothing installed"
-install -m 440 -o root -g wheel "$sudoers_tmp" /etc/sudoers.d/underground
-ug_say ok "sudoers" "$owner may run the agent helpers as $agent_user"
+ug_step "leftovers"
+old_omp=$owner_home/.local/bin/omp
+if [[ -L $old_omp && $(readlink "$old_omp") == "$data/agent/"* ]]; then
+  rm -f "$old_omp"
+  ug_say changed "$old_omp" "deleted; omp now runs in the Tern shell of $agent_user"
+fi
+for old in "$data/agent-ssh" "$data/agent"; do
+  [[ -e $old || -L $old ]] || continue
+  rm -rf "$old"
+  ug_say changed "${old##*/}" "deleted from $data; no longer used"
+done
 
 for item in "$root"/* "$root"/.[!.]*; do
   [[ -e $item || -L $item ]] || continue
   case ${item##*/} in
-    omp | gh | code | github-app | logs | gateway-token | ssh_host_ed25519_key | ssh_host_ed25519_key.pub) ;;
+    omp | gh | tern | code | github-app | logs | gateway-token | tern-remote | status) ;;
     *)
       rm -rf "$item"
       ug_say changed "${item##*/}" "deleted from $root; no longer used"
@@ -413,7 +456,6 @@ model_start=$(date +%s)
 model_rc=0
 model_out=$( (cd / && ug_as "$agent_user" /bin/sh -c '
   set -m
-  unset UG_REPO
   "$1" -p "Reply with: ok" </dev/null & child=$!
   ( i=$2
     while [ "$i" -gt 0 ]; do

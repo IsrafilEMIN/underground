@@ -18,7 +18,6 @@ if [[ ${1:-} == plugin ]]; then
   exit 0
 fi
 log_note "HOME=$HOME"
-log_note "UG_REPO=${UG_REPO-<unset>}"
 log_note "UG_NOTICES=$(printf '%q' "${UG_NOTICES-}")"
 log_note "UG_GATEWAY_TOKEN=${UG_GATEWAY_TOKEN:+set}"
 log_note "OMP_AUTH_BROKER_URL=${OMP_AUTH_BROKER_URL-<unset>}"

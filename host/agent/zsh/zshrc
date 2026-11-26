@@ -1,0 +1,6 @@
+# zsh reads this from ZDOTDIR in place of the agent's own ~/.zshrc.
+# Without ZDOTDIR, ~/.zlogin and the shells this one starts read the agent's own files.
+unset ZDOTDIR
+[[ ! -r $HOME/.zshrc ]] || source "$HOME/.zshrc"
+typeset -U path
+path=(@ROOT@/code/session-bin @ROOT@/code/bin $path)

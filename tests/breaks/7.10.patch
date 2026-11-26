@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -261,7 +261,7 @@
+ dream_report
+ agent_check_report
+ 
+-common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
++common=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) || common=
+ repo=${common#"$HOME/work/"}
+ repo=${repo%/.git}
+ [[ $common == "$HOME/work/$repo/.git" && $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || start_omp "$@"

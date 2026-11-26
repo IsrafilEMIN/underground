@@ -1,0 +1,11 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -268,7 +268,6 @@
+ [[ $common == "$HOME/work/$repo/.git" && $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || start_omp "$@"
+ clone=$HOME/work/$repo
+ origin=$(git -C "$clone" config --get remote.origin.url) || origin=
+-[[ $origin == "https://github.com/$repo.git" || $origin == "https://github.com/$repo" ]] || start_omp "$@"
+ 
+ git -C "$clone" config remote.origin.followRemoteHEAD always
+ sync_report "$clone"

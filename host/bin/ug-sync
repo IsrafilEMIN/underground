@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [[ $# -ne 0 ]]; then
+  printf 'usage: ug-sync\n' >&2
+  exit 64
+fi
+
+src=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+# shellcheck source=host/lib/ug.bash disable=SC1091
+source "$src/host/lib/ug.bash"
+# shellcheck source=host/lib/sources.bash disable=SC1091
+source "$src/host/lib/sources.bash"
+data=$HOME/$(ug_fact owner_data)
+sources="$data/sources"
+unpack=$(ug_fact root)/code/bin/agent-unpack
+agent_user=$(ug_fact agent_user)
+
+log() { printf '%s ug-sync: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
+
+if [[ ! -f $sources ]]; then
+  log "no $sources; run host/bin/ug-setup"
+  exit 1
+fi
+
+status=0
+synced=$(ug_sync_sources "$sources" "$HOME" "$agent_user" "$unpack" ug-sync) || status=1
+while IFS= read -r target; do
+  [[ -z $target ]] || log "synced $agent_user:$target"
+done <<<"$synced"
+[[ $status -eq 0 ]] || log "one or more sources in $sources did not sync"
+exit $status

@@ -47,9 +47,7 @@ restic_bz2_sha=$(ug_pin_checked "$src/VERSIONS" restic_bz2_sha256 '^[0-9a-f]{64}
 restic_release=$(ug_pin_checked "$src/VERSIONS" restic_release '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download$' ug-setup)
 
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || ug_die ug-setup "the omp pin names omp-darwin-arm64; this mac is $(uname -s) $(uname -m)"
-for name in omp ug-auth; do
-  [[ ! -e $bin_dir/$name || -L $bin_dir/$name ]] || ug_die ug-setup "$bin_dir/$name is a file, not setup's link; move it away, then run setup again"
-done
+[[ ! -e $bin_dir/ug-auth || -L $bin_dir/ug-auth ]] || ug_die ug-setup "$bin_dir/ug-auth is a file, not setup's link; move it away, then run setup again"
 
 cleanup=()
 trap '[[ ${#cleanup[@]} -eq 0 ]] || rm -rf "${cleanup[@]}"' EXIT
@@ -178,7 +176,7 @@ setup_sources() {
     check_source "$path"
   done <<<"$pairs"
   [[ -s $data/sources ]] ||
-    later+=("add config repos to $data/sources, one per line: <repo path> <target in the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; until then, omp does not update the agent's config")
+    later+=("add config repos to $data/sources, one per line: <repo path> <target in the agent home>, for example ~/Developer/Projects/agent-config .omp/agent; until then, nothing updates the agent's config")
 }
 
 put() {
@@ -214,10 +212,10 @@ install_service_code() {
   local dir="$data/services" f
   rm -rf "$dir"
   install -d -m 700 "$dir" "$dir/host/bin" "$dir/host/lib"
-  for f in host/bin/ug-backup host/bin/ug-auth host/lib/backup-target.bash host/lib/ug.bash host/facts host/services VERSIONS; do
+  for f in host/bin/ug-backup host/bin/ug-auth host/bin/ug-sync host/lib/backup-target.bash host/lib/sources.bash host/lib/ug.bash host/facts host/services VERSIONS; do
     put "$src/$f" "$dir/$f" 444
   done
-  chmod 555 "$dir/host/bin/ug-backup" "$dir/host/bin/ug-auth"
+  chmod 555 "$dir/host/bin/ug-backup" "$dir/host/bin/ug-auth" "$dir/host/bin/ug-sync"
   link "$dir/host/bin/ug-auth" "$bin_dir/ug-auth"
   ug_say ok "service code" "installed in $dir, ug-auth in $bin_dir"
 }
@@ -263,19 +261,44 @@ start_services() {
   done < <(ug_services agent)
 }
 
-check_path() {
-  local dirs dir found=()
-  IFS=: read -r -a dirs <<<"$PATH"
-  for dir in "${dirs[@]}"; do
-    [[ -n $dir && -x $dir/omp && ! -d $dir/omp ]] && found+=("$dir/omp")
-  done
-  if [[ ${#found[@]} -eq 0 ]]; then
-    later+=("omp is not on PATH; add $bin_dir to PATH")
-  elif [[ ${found[0]} != "$bin_dir/omp" ]]; then
-    later+=("the first omp on PATH is ${found[0]}; put $bin_dir before ${found[0]%/omp} on PATH")
-  elif [[ ${#found[@]} -gt 1 ]]; then
-    later+=("several omp on PATH (${found[*]}); keep only $bin_dir/omp")
+sync_sources() {
+  local out
+  if out=$("$data/services/host/bin/ug-sync" 2>&1); then
+    ug_say ok sources "synced $data/sources into the agent home"
+  else
+    ug_say warn sources "ug-sync failed: ${out//$'\n'/ }"
   fi
+}
+
+setup_tern() {
+  local tern=/Applications/Tern.app/Contents/MacOS/tern agent_user agent_home port line addr='' fp='' extra='' out how
+  agent_user=$(ug_fact agent_user)
+  agent_home=$(ug_fact agent_home)
+  port=$(ug_fact agent_tern_port)
+  ug_step tern
+  line=$(cat "$data/tern-host" 2>/dev/null) || line=
+  read -r addr fp extra <<<"$line" || true
+  if [[ $addr =~ ^127\.0\.0\.1:[0-9]{1,5}$ && $fp =~ ^SHA256:[A-Za-z0-9+/]+=*$ && -z $extra ]]; then
+    port=${addr#*:}
+  else
+    ug_say warn tern "$data/tern-host is missing or is not one line of 127.0.0.1:<port> SHA256:<fingerprint>; run host/bin/ug-setup again"
+    addr='' fp=''
+  fi
+  if [[ -z $fp ]]; then
+    how="setup cannot read its host key from $data/tern-host, so run host/bin/ug-setup again and trust the key it reports"
+  elif [[ ! -x $tern ]]; then
+    ug_say warn tern "$tern is missing; install Tern in /Applications"
+    how="its host key is not trusted yet; install Tern in /Applications, then run: $tern remote trust $addr $fp"
+  elif out=$("$tern" remote trust "$addr" "$fp" 2>&1); then
+    ug_say ok tern "trusted the agent host key $fp for $addr"
+    how="its host key $fp is already trusted"
+  else
+    ug_say warn tern "tern remote trust $addr $fp failed: ${out//$'\n'/ }"
+    how="its host key is not trusted yet; run: $tern remote trust $addr $fp"
+  fi
+  later+=("open Tern, choose Add remote host, and enter $agent_user@127.0.0.1:$port; $how. typing omp in that shell starts the agent in the current folder; repos live in $agent_home/work/<owner>/<name> there")
+  compgen -G "$HOME/.ssh/id_*.pub" >/dev/null ||
+    later+=("you have no ssh key in $HOME/.ssh, so Tern cannot log in to the agent; run ssh-keygen -t ed25519, then run host/bin/ug-setup again")
 }
 
 check_app_repos() {
@@ -346,12 +369,12 @@ ug_say ok sudo "running host/bin/ug-agent-setup; it may ask for your password"
 no_color=()
 [[ -z ${NO_COLOR:-} ]] || no_color=(env NO_COLOR=1)
 sudo ${no_color[@]+"${no_color[@]}"} "$src/host/bin/ug-agent-setup" || ug_die ug-setup "ug-agent-setup failed, so the agent user is not up to date; fix its error and run host/bin/ug-setup again"
+sync_sources
 
 check_app_repos
 
 ug_step services
 start_services
 check_agent
-
-check_path
+setup_tern
 finish

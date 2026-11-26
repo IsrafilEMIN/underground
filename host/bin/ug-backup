@@ -14,7 +14,9 @@ data=$HOME/$(ug_fact owner_data)
 restic_bin="$data/restic/$restic_pin/restic"
 backup="$data/backup"
 config="$backup/config"
-agent_tar=$(ug_fact root)/code/bin/agent-home-tar
+root=$(ug_fact root)
+agent_tar=$root/code/bin/agent-home-tar
+status_dir=$root/status
 agent_user=$(ug_fact agent_user)
 
 log() { printf '%s ug-backup: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
@@ -80,12 +82,22 @@ else
       log "checking the repo $repo failed (restic exit $status$(restic_hint "$status")): ${err//$'\n'/ }"
     else
       log "checked data subset $subset/100 of $repo"
+      now=$(date +%s)
       tmp=$(mktemp "$backup/.last.XXXXXX") || tmp=
-      if [[ -n $tmp ]] && date +%s >"$tmp" && mv -f "$tmp" "$backup/last"; then
+      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && mv -f "$tmp" "$backup/last"; then
         log "recorded the run in $backup/last"
       else
         [[ -z $tmp ]] || rm -f "$tmp"
         log "cannot record the run in $backup/last"
+        status=1
+      fi
+      tmp=
+      [[ ! -d $status_dir ]] || tmp=$(mktemp "$status_dir/.backup-last.XXXXXX") || tmp=
+      if [[ -n $tmp ]] && printf '%s\n' "$now" >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$status_dir/backup-last"; then
+        log "recorded the run in $status_dir/backup-last"
+      else
+        [[ -z $tmp ]] || rm -f "$tmp"
+        log "cannot record the run in $status_dir/backup-last; the agent sees no backup age; run host/bin/ug-setup"
         status=1
       fi
     fi

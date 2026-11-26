@@ -1,0 +1,10 @@
+# zsh reads this from ZDOTDIR in place of the agent's own ~/.zshenv.
+# Tern gives its shells a bare environment, so the agent's environment is set here; Tern's PATH stays behind it.
+tern_path=$PATH
+if source @ROOT@/code/agent-env && ug_agent_env tern-shell; then
+  PATH=$PATH:$tern_path
+else
+  PATH=$tern_path
+fi
+unset tern_path
+[[ ! -r $HOME/.zshenv ]] || source "$HOME/.zshenv"

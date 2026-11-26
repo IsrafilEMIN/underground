@@ -11,12 +11,12 @@ die() {
   printf 'agent-start: %s\n' "$*" >&2
   exit 1
 }
-export UG_NOTICES=${UG_NOTICES:-}
+export UG_NOTICES=
 add_notice() { UG_NOTICES=${UG_NOTICES:+$UG_NOTICES$'\n'}$1; }
 
 omp_bin=$(readlink "$code/bin/omp") || die "no $code/bin/omp; the owner runs host/bin/ug-setup"
 
-# The agent's ssh login has no desktop session, so macOS logs failed text-checking and spell-server lookups to stderr.
+# The Tern service is a launchd job without a desktop session, so macOS logs failed text-checking and spell-server lookups to stderr.
 # grep ignores SIGINT so that a Ctrl-C cannot close omp's stderr.
 start_omp() {
   [[ -f $code/ug-notices.ts ]] || die "no $code/ug-notices.ts, so omp cannot show its warnings; the owner runs host/bin/ug-agent-setup"
@@ -156,7 +156,17 @@ sync_repo() {
   /usr/bin/lockf -k -t 0 .git/ug-sync.lock /bin/bash -c "$(declare -f sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo)"'
     git fetch --quiet --no-tags --prune origin || exit 1
     base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
-    git reset -q --hard "$base" || exit 1
+    # The owner works in the main checkout too, so it moves only when it is detached or on the default branch with no changes.
+    branch=$(git symbolic-ref --quiet --short HEAD) || branch=
+    changes=$(GIT_OPTIONAL_LOCKS=0 git status --porcelain --untracked-files=no) || exit 1
+    if [[ -n $branch && $branch != "${base#origin/}" ]]; then
+      printf "the main checkout of %s is on the branch %s, so it did not move to %s\n" "$1" "$branch" "$base" >.git/ug-reset.summary
+    elif [[ -n $changes ]]; then
+      printf "the main checkout of %s has uncommitted changes, so it did not move to %s\n" "$1" "$base" >.git/ug-reset.summary
+    else
+      rm -f .git/ug-reset.summary
+      git reset -q --hard "$base" || exit 1
+    fi
     sweep_repo "$1" "$base"
     exit 0
   ' _ "$repo"
@@ -168,12 +178,14 @@ sync_repo() {
 }
 
 clean_report() {
-  local clone=$1 line
-  [[ -f $clone/.git/ug-clean.summary ]] || return 0
-  while IFS= read -r line; do
-    [[ -z $line ]] || add_notice "$line"
-  done <"$clone/.git/ug-clean.summary"
-  rm -f "$clone/.git/ug-clean.summary"
+  local clone=$1 line f
+  for f in "$clone/.git/ug-reset.summary" "$clone/.git/ug-clean.summary"; do
+    [[ -f $f ]] || continue
+    while IFS= read -r line; do
+      [[ -z $line ]] || add_notice "$line"
+    done <"$f"
+    rm -f "$f"
+  done
 }
 
 sync_report() {
@@ -181,14 +193,27 @@ sync_report() {
   status=$(head -n 1 "$clone/.git/ug-fetch.status" 2>/dev/null) || status=
   [[ ${status%% *} == failed ]] || return 0
   last=$(tail -n 1 "$clone/.git/ug-fetch.log" 2>/dev/null) || last=
-  add_notice "the last background fetch of $UG_REPO failed: ${last:-no log line}"
+  add_notice "the last background fetch of $repo failed: ${last:-no log line}"
   now=$(date +%s)
   if [[ -f $clone/.git/ug-fetch.pid ]]; then
     read -r old_pid old_at <"$clone/.git/ug-fetch.pid" || true
     if [[ ${old_pid:-} =~ ^[0-9]+$ && ${old_at:-} =~ ^[0-9]+$ ]] && (( now - old_at > 600 )) && kill -0 "$old_pid" 2>/dev/null; then
       kill "$old_pid" 2>/dev/null || true
-      add_notice "killed a background fetch of $UG_REPO stuck for over 10 minutes"
+      add_notice "killed a background fetch of $repo stuck for over 10 minutes"
     fi
+  fi
+}
+
+backup_report() {
+  local last now read_log="read ~/@OWNER_DATA@/backup/backup.log in the owner account"
+  last=$(head -n 1 "$root/status/backup-last" 2>/dev/null) || last=
+  if [[ ! $last =~ ^[0-9]+$ ]]; then
+    add_notice "no good backup yet; $read_log"
+    return 0
+  fi
+  now=$(date +%s)
+  if ((now - last > 172800)); then
+    add_notice "the last good backup is $(((now - last) / 86400)) days old; $read_log"
   fi
 }
 
@@ -232,40 +257,20 @@ for dir in "$HOME/.omp" "$agent"; do
   if [[ -L $dir || ( -e $dir && ! -d $dir ) ]]; then rm -f "$dir"; fi
   mkdir -p "$dir"
 done
+backup_report
 dream_report
 agent_check_report
 
-if [[ -z ${UG_REPO:-} ]]; then
-  mkdir -p "$HOME/scratch"
-  cd "$HOME/scratch"
-  start_omp "$@"
-fi
-[[ $UG_REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "UG_REPO has a value that is not owner/name"
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
+repo=${common#"$HOME/work/"}
+repo=${repo%/.git}
+[[ $common == "$HOME/work/$repo/.git" && $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || start_omp "$@"
+clone=$HOME/work/$repo
+origin=$(git -C "$clone" config --get remote.origin.url) || origin=
+[[ $origin == "https://github.com/$repo.git" || $origin == "https://github.com/$repo" ]] || start_omp "$@"
 
-clone=$HOME/work/$UG_REPO
-if [[ ! -d $clone/.git ]]; then
-  # A first clone blocks: omp needs files and an index from the start.
-  rm -rf "$clone"
-  mkdir -p "$clone"
-  git -C "$clone" init -q
-  git -C "$clone" remote add origin "https://github.com/$UG_REPO.git"
-  git -C "$clone" config remote.origin.followRemoteHEAD always
-  git -C "$clone" fetch --quiet --no-tags origin || {
-    printf 'agent-start: git fetch origin for %s failed: is the GitHub App installed on it, and does GitHub answer?\n' "$UG_REPO" >&2
-    exit 69
-  }
-  base=$(git -C "$clone" symbolic-ref --quiet --short refs/remotes/origin/HEAD) || base=
-  [[ -n $base ]] || {
-    printf 'agent-start: cannot read the default branch of %s from GitHub\n' "$UG_REPO" >&2
-    exit 69
-  }
-  git -C "$clone" checkout -q --detach "$base" || die "the new clone of $UG_REPO cannot check out $base; is that repository empty?"
-  cd "$clone"
-  start_omp "$@"
-fi
-cd "$clone"
 git -C "$clone" config remote.origin.followRemoteHEAD always
 sync_report "$clone"
 clean_report "$clone"
-GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo); sync_repo \"\$@\"" _ "$clone" "$UG_REPO" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
+GIT_TERMINAL_PROMPT=0 /bin/bash -c "trap '' HUP; $(declare -f sync_repo sweep_idle sweep_pulls sweep_commits_safe sweep_files_safe sweep_worktree sweep_repo); sync_repo \"\$@\"" _ "$clone" "$repo" </dev/null >>"$clone/.git/ug-fetch.log" 2>&1 &
 start_omp "$@"

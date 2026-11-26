@@ -1,10 +1,10 @@
 # Back up the agent home
 
-`ug-backup` saves the agent home (`.omp/agent` and `scratch`) to the restic repo on the backup host once a day. launchd runs it as the owner, and the owner can run it by hand. The first run makes the repo. Each good run clears stale locks, saves one snapshot (tried twice), checks a part of the repo data and records the time in `backup/last`. Every failure is one log line on stderr and exit 1, and `backup/last` stays as it was. The `omp` launcher reads `backup/last` and warns when there is no good backup or it is more than 2 days old.
+`ug-backup` saves the agent home (`.omp/agent` and `scratch`) to the restic repo on the backup host once a day. launchd runs it as the owner, and the owner can run it by hand. The first run makes the repo. Each good run clears stale locks, saves one snapshot (tried twice), checks a part of the repo data and records the time in the owner's `backup/last` and in `<root>/status/backup-last` (mode 644, for the agent). Every failure is one log line on stderr and exit 1, and both records stay as they were. The agent session start (`code/agent-start`, reached by typing `omp` in the agent's Tern shell) reads `status/backup-last` and warns when there is no good backup or it is more than 2 days old.
 
 ## Sub-features
 
-- `first-run` makes the repo, saves a snapshot, checks it and writes `backup/last`.
+- `first-run` makes the repo, saves a snapshot, checks it and writes `backup/last` and `root/status/backup-last`.
 - `snapshot` holds `.omp/agent` and `scratch`, not the cache, `models.db*` or `node_modules`; a live sqlite db is a consistent copy.
 - `second-run` uses the existing repo (no init) and adds one snapshot.
 - `backup-fail` tries the save twice, does no check, exit 1, `last` unchanged.
@@ -14,31 +14,32 @@
 - `bad-config` rejects a repo that is not `sftp:`, an unknown key, a line without `=`, and a missing config.
 - `missing-setup` stops on a missing pinned restic, a missing or empty password, or a missing agent home reader.
 - `usage` refuses arguments.
-- `age` the next `omp` launch shows no backup notice after a good run.
+- `status-missing` a good run that cannot write `root/status/backup-last` still writes `backup/last` but exits 1.
+- `age` the next session start shows no backup notice after a good run, and warns about a missing or old `status/backup-last`.
 
 ## How to get to it (user POV)
 
 - launchd runs `host/bin/ug-backup` daily as the owner (LaunchAgent installed by `ug-setup`; not drivable in the stand-in, see Gotchas). Its stderr goes to `~/.local/share/underground/backup/backup.log`.
 - The owner runs `host/bin/ug-backup` by hand in a terminal.
-- The owner sees the result at the next `omp` launch as a backup notice, or no notice (see [launch-agent.md](./launch-agent.md)).
+- The owner sees the result at the next session start in the agent's Tern shell as a backup notice, or no notice (see [session-start.md](./session-start.md)).
 
 ## Driving it with ugv
 
 Preconditions:
 
 - Fresh stand-in: `U=.omp/skills/verify-underground/scripts/ugv`, `RUN=$(date +%Y%m%d-%H%M%S)-backup`, `$U up "$RUN"`, `B=/private/tmp/ugv-$RUN`, and `$U doctor "$RUN"` ends with `doctor: ok`.
-- `D=owner-home/.local/share/underground` (relative to `$B`; `look` runs in `$B`). The baseline config is `repo=sftp:verify@backup.invalid:/ugv-$RUN`, `$D/backup/last` is missing and `$B/backup-repo` does not exist.
+- `D=owner-home/.local/share/underground` (relative to `$B`; `look` runs in `$B`). The baseline config is `repo=sftp:verify@backup.invalid:/ugv-$RUN`, `$D/backup/last` and `root/status/backup-last` are missing, `root/status/` exists, and `$B/backup-repo` does not exist.
 - Run the bullets in order: the snapshot seeds come before `first-run`, and the later failure bullets need the repo and the `last` value from the good runs.
 
 - **Seed the agent home.** Add scratch files and the parts that must stay out. Run `$U look "$RUN" snapshot-seed -- /bin/sh -c 'mkdir -p agent-home/scratch/notes agent-home/.omp/agent/cache agent-home/.omp/agent/node_modules/x && echo hi >agent-home/scratch/notes/a.txt && echo c >agent-home/.omp/agent/cache/blob && echo m >agent-home/.omp/agent/models.db && echo n >agent-home/.omp/agent/node_modules/x/i.js'`. Exit 0.
 - **Seed a live db.** Keep a sqlite writer open with its data only in the WAL. Run `$U look "$RUN" snapshot-live-db -- /bin/sh -c '( printf "PRAGMA journal_mode=WAL;\nCREATE TABLE t(v);\nINSERT INTO t VALUES (\"live\");\n"; sleep 120 ) | /usr/bin/sqlite3 "$1" >/dev/null 2>&1 &' _ "$B/agent-home/.omp/agent/sessions.db"`, then `$U look "$RUN" snapshot-live-db-state -- ls -l agent-home/.omp/agent`. The listing shows `sessions.db` (4096 bytes), `sessions.db-wal` and `sessions.db-shm`.
-- **first-run.** Run the daily backup by hand. Run `$U owner "$RUN" --label first-run -- host/bin/ug-backup`. Exit 0; stderr is `ug-backup: made the repo sftp:verify@backup.invalid:/ugv-<RUN>`, `cleared any stale locks in ...`, `saved the agent home to ...`, `checked data subset NN/100 of ...`, `recorded the run in $B/owner-home/.local/share/underground/backup/last`. Calls: ssh `-o BatchMode=yes -o ConnectTimeout=10 verify@backup.invalid true`; restic `cat config`, `init`, `unlock`, `backup --quiet --tag ug-agent --stdin-filename ug-agent-home.tar --stdin-from-command -- sudo -n -u ugagent $B/root/code/bin/agent-home-tar`, `check --read-data-subset=NN/100`; sudo `-n -u ugagent $B/root/code/bin/agent-home-tar`.
-- **first-run state.** Read the record and the repo. Run `$U look "$RUN" first-run-state -- /bin/sh -c "cat $D/backup/last; ls backup-repo/snapshots; cat backup-repo/config"`. A Unix time (for example `1795319428`), `001.tar`, and `repo=sftp:verify@backup.invalid:/ugv-<RUN>`.
+- **first-run.** Run the daily backup by hand. Run `$U owner "$RUN" --label first-run -- host/bin/ug-backup`. Exit 0; stderr is `ug-backup: made the repo sftp:verify@backup.invalid:/ugv-<RUN>`, `cleared any stale locks in ...`, `saved the agent home to ...`, `checked data subset NN/100 of ...`, `recorded the run in $B/owner-home/.local/share/underground/backup/last`, `recorded the run in $B/root/status/backup-last`. Calls: ssh `-o BatchMode=yes -o ConnectTimeout=10 verify@backup.invalid true`; restic `cat config`, `init`, `unlock`, `backup --quiet --tag ug-agent --stdin-filename ug-agent-home.tar --stdin-from-command -- sudo -n -u ugagent $B/root/code/bin/agent-home-tar`, `check --read-data-subset=NN/100`; sudo `-n -u ugagent $B/root/code/bin/agent-home-tar`.
+- **first-run state.** Read the records and the repo. Run `$U look "$RUN" first-run-state -- /bin/sh -c "cat $D/backup/last root/status/backup-last; stat -f %Lp root/status/backup-last; ls backup-repo/snapshots; cat backup-repo/config"`. The same Unix time twice (for example `1795319428`), `644`, `001.tar`, and `repo=sftp:verify@backup.invalid:/ugv-<RUN>`.
 - **snapshot list.** Read the snapshot members. Run `$U look "$RUN" snapshot-list -- tar -tf backup-repo/snapshots/001.tar`. It lists `./.omp/agent/`, `./.omp/agent/extensions/underground-guard.ts`, `./.omp/agent/skills/dream-review/SKILL.md`, `./scratch/notes/a.txt` and `./.omp/agent/sessions.db`. It has no `cache/`, no `models.db`, no `node_modules`, no `sessions.db-wal`/`-shm`.
 - **snapshot live db.** Open the db from the snapshot alone. Run `$U look "$RUN" snapshot-db -- /bin/sh -c 'd=$(mktemp -d) && tar -xf backup-repo/snapshots/001.tar -C "$d" ./.omp/agent/sessions.db && /usr/bin/sqlite3 "$d/.omp/agent/sessions.db" "select v from t;"'`. Stdout `live`: the row that was only in the WAL is in the saved file.
 - **second-run.** Run the backup again. Run `$U owner "$RUN" --label second-run -- host/bin/ug-backup`. Exit 0; no `made the repo` line; restic calls are `cat config`, `unlock`, `backup ...`, `check ...` with no `init`.
 - **second-run state.** Run `$U look "$RUN" second-run-state -- /bin/sh -c "cat $D/backup/last; ls backup-repo/snapshots"`. A newer time and `001.tar 002.tar`. Note this `last` value for the failure bullets.
-- **age.** Start a session after the good run. Run `$U owner "$RUN" --label age-fresh -- host/bin/ug-agent`. Exit 0, stdout `omp-stub: session started in $B/agent-home/scratch` with no `omp-stub: warning notice:` line; ssh and omp calls note `UG_NOTICES=''`. The stale and missing cases are in [launch-agent.md](./launch-agent.md).
+- **age.** Start a session after the good run. Run `$U agent "$RUN" --label age-fresh -- code/session-bin/omp`. Exit 0, stdout `omp-stub: session started in $B/agent-home` with no `omp-stub: warning notice:` line; the omp session call notes `UG_NOTICES=''`. The stale and missing cases are in [session-start.md](./session-start.md).
 - **backup-fail.** Make the save fail. Run `$U fault "$RUN" restic-backup 1`, then `$U owner "$RUN" --label backup-fail -- host/bin/ug-backup`. Exit 1; stderr `attempt 1: the agent home was not saved (restic exit 1); a failed read stores no snapshot`, the same for `attempt 2`, then `the agent home was not saved in 2 attempts`. Calls: two restic `backup` calls each with `fault restic-backup: exit 1`, and no `check`.
 - **backup-fail state.** Run `$U look "$RUN" backup-fail-state -- /bin/sh -c "cat $D/backup/last; ls backup-repo/snapshots"`, then `$U fault "$RUN" restic-backup clear`. `last` is the second-run value; still `001.tar 002.tar`.
 - **check-fail.** Make the check fail. Run `$U fault "$RUN" restic-check 1`, then `$U owner "$RUN" --label check-fail -- host/bin/ug-backup`. Exit 1; stderr `saved the agent home to ...` then `checking the repo sftp:verify@backup.invalid:/ugv-<RUN> failed (restic exit 1): `.
@@ -59,6 +60,7 @@ Preconditions:
 - **missing-setup state.** Run `$U look "$RUN" missing-state -- /bin/sh -c "cat $D/backup/last; ls backup-repo/snapshots; wc -c $D/backup/password"`. `last` unchanged; no new snapshot; password back to 33 bytes.
 - **usage.** Run `$U owner "$RUN" --label usage -- host/bin/ug-backup now`. Exit 64; stderr `usage: ug-backup`.
 - **recover.** With all faults cleared and files restored, run `$U owner "$RUN" --label recover -- host/bin/ug-backup`, then `$U look "$RUN" recover-state -- /bin/sh -c "cat $D/backup/last; ls backup-repo/snapshots"`. Exit 0 with `recorded the run in ...`; `last` is newer; one more snapshot.
+- **status-missing.** Move the status dir away, run, and move it back. Run `$U look "$RUN" status-missing-seed -- mv root/status root/status.away`, `$U owner "$RUN" --label status-missing -- host/bin/ug-backup` and `$U look "$RUN" status-missing-restore -- /bin/sh -c "mv root/status.away root/status; cat $D/backup/last root/status/backup-last"`. Exit 1; stderr has `recorded the run in $B/owner-home/.local/share/underground/backup/last` and then `cannot record the run in $B/root/status/backup-last; the agent sees no backup age; run host/bin/ug-setup`. The restore step shows a newer `backup/last` and the older `status/backup-last` from `recover`.
 - **Cleanup.** Run `$U down "$RUN"`. It prints `removed /private/tmp/ugv-<RUN>` and `evidence: ~/scratch/verify-underground/<RUN>`.
 
 ## Gotchas

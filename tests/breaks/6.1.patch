@@ -1,0 +1,12 @@
+diff --git a/host/bin/ug-sync b/host/bin/ug-sync
+--- a/host/bin/ug-sync
++++ b/host/bin/ug-sync
+@@ -24,7 +24,7 @@
+ fi
+ 
+ status=0
+-synced=$(ug_sync_sources "$sources" "$HOME" "$agent_user" "$unpack" ug-sync) || status=1
++synced=$(ug_sync_sources "$sources" "$data" "$agent_user" "$unpack" ug-sync) || status=1
+ while IFS= read -r target; do
+   [[ -z $target ]] || log "synced $agent_user:$target"
+ done <<<"$synced"

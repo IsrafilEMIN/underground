@@ -11,7 +11,7 @@ ub_fixture() {
   UB_ROOT=$UG_TMPDIR/root
   UB_STATE=$UG_TMPDIR/state
   UB_STUBS=$UG_TMPDIR/stubs
-  mkdir -p "$UB_SRC/host/bin" "$UB_ROOT/code/bin" "$UB_STATE" "$UB_STUBS" || fail 'cannot make the fixture dirs'
+  mkdir -p "$UB_SRC/host/bin" "$UB_ROOT/code/bin" "$UB_ROOT/status" "$UB_STATE" "$UB_STUBS" || fail 'cannot make the fixture dirs'
   cp "$UG_REPO_ROOT/VERSIONS" "$UB_SRC/VERSIONS" &&
     cp "$UG_REPO_ROOT/host/bin/ug-backup" "$UB_SRC/host/bin/ug-backup" &&
     cp -R "$UG_REPO_ROOT/host/lib" "$UB_SRC/host/lib" || fail 'cannot copy ug-backup and its libraries'
@@ -63,6 +63,7 @@ ub_run() {
   HOME=$UB_HOME PATH=$UB_STUBS:/usr/bin:/bin "$UB_SRC/host/bin/ug-backup" 2>"$UB_STATE/err" || ub_rc=$?
   ub_err=$(cat "$UB_STATE/err")
   ub_last=$(cat "$UB_BACKUP/last")
+  ub_status_last=$(cat "$UB_ROOT/status/backup-last" 2>/dev/null) || ub_status_last='<missing>'
 }
 
 ub_subcommands() {
@@ -131,4 +132,21 @@ t_4_5() {
   ub_run
   assert_eq 0 "$ub_rc" "the day 366 run exits 0 ($ub_err)"
   assert_eq 'check --read-data-subset=67/100' "$(ub_check_call)" 'day 366 checks data subset 67/100'
+}
+
+t_4_6() {
+  ub_fixture
+  ub_restic_fails check 1
+  ub_run
+  assert_eq '<missing>' "$ub_status_last" 'a run whose check fails writes no status/backup-last'
+  ub_restic_fails check 0
+  ub_run
+  assert_eq 0 "$ub_rc" "a passing run exits 0 ($ub_err)"
+  assert_eq "$UB_NEW_LAST" "$ub_status_last" 'status/backup-last holds the time of the passing run for the agent'
+  assert_eq 644 "$(stat -f %Lp "$UB_ROOT/status/backup-last")" 'the agent can read status/backup-last'
+  rm -rf "$UB_ROOT/status"
+  ub_run
+  assert_eq 1 "$ub_rc" 'a passing run that cannot write status/backup-last exits 1'
+  assert_contains "cannot record the run in $UB_ROOT/status/backup-last" "$ub_err" 'the log names the status file it cannot write'
+  assert_eq "$UB_NEW_LAST" "$ub_last" 'backup/last is still recorded'
 }

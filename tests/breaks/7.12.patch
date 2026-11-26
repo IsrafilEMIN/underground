@@ -1,0 +1,12 @@
+diff --git a/host/agent/agent-start b/host/agent/agent-start
+--- a/host/agent/agent-start
++++ b/host/agent/agent-start
+@@ -158,7 +158,7 @@
+     base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || exit 1
+     # The owner works in the main checkout too, so it moves only when it is detached or on the default branch with no changes.
+     branch=$(git symbolic-ref --quiet --short HEAD) || branch=
+-    changes=$(GIT_OPTIONAL_LOCKS=0 git status --porcelain --untracked-files=no) || exit 1
++    changes=
+     if [[ -n $branch && $branch != "${base#origin/}" ]]; then
+       printf "the main checkout of %s is on the branch %s, so it did not move to %s\n" "$1" "$branch" "$base" >.git/ug-reset.summary
+     elif [[ -n $changes ]]; then

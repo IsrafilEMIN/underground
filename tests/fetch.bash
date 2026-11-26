@@ -12,21 +12,24 @@ fx_commit() {
 
 fetch_fixture() {
   ug_mktemp_dir
+  # git reports the physical cwd, and agent-start compares it with $HOME/work.
+  UG_TMPDIR=$(cd "$UG_TMPDIR" && pwd -P) || fail 'cannot resolve the temp dir'
   fx_repo=acme/widget
   fx_home=$UG_TMPDIR/home
   fx_root=$UG_TMPDIR/root
-  fx_origin=$UG_TMPDIR/origin.git
+  fx_origin=$UG_TMPDIR/gh/$fx_repo.git
   fx_clone=$fx_home/work/$fx_repo
-  mkdir -p "$fx_home/work/acme" "$fx_root/code/bin" || fail 'cannot make the fixture dirs'
+  mkdir -p "$fx_home/work/acme" "$fx_root/code/bin" "$fx_root/status" "$UG_TMPDIR/gh/acme" || fail 'cannot make the fixture dirs'
   printf 'gateway-secret\n' >"$fx_root/gateway-token"
+  date +%s >"$fx_root/status/backup-last"
   : >"$fx_root/code/ug-notices.ts"
-  printf '#!/bin/bash\nprintf %%s "${UG_NOTICES-}" >%q\n' "$UG_TMPDIR/notices" >"$fx_root/code/omp-stub"
+  printf '#!/bin/bash\npwd -P >%q\nprintf %%s "${UG_NOTICES-}" >%q\n' "$UG_TMPDIR/omp.cwd" "$UG_TMPDIR/notices" >"$fx_root/code/omp-stub"
   chmod +x "$fx_root/code/omp-stub"
   ln -s "$fx_root/code/omp-stub" "$fx_root/code/bin/omp"
   printf '#!/bin/bash\n[[ ! -f %q ]] || cat %q\n' "$UG_TMPDIR/open-prs" "$UG_TMPDIR/open-prs" >"$fx_root/code/bin/gh"
   chmod +x "$fx_root/code/bin/gh"
   render "$UG_REPO_ROOT/host/agent/agent-start" "$UG_TMPDIR/agent-start" \
-    AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9
+    AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9 OWNER_DATA=.local/share/underground
   render "$UG_REPO_ROOT/host/agent/agent-env" "$fx_root/code/agent-env" \
     AGENT_HOME="$fx_home" ROOT="$fx_root" USAGE_BROKER_PORT=9
   fx_git init -q --bare -b main "$fx_origin" || fail 'cannot make the bare origin'
@@ -34,6 +37,9 @@ fetch_fixture() {
   fx_git -C "$UG_TMPDIR/seed" remote add origin "$fx_origin"
   fx_old=$(fx_commit first)
   fx_git clone -q "$fx_origin" "$fx_clone" || fail 'cannot clone the origin'
+  # The clone names its GitHub origin, and git fetches it from the bare repo.
+  fx_git -C "$fx_clone" remote set-url origin "https://github.com/$fx_repo.git" || fail 'cannot set the GitHub origin'
+  fx_git -C "$fx_clone" config "url.$UG_TMPDIR/gh/.insteadOf" https://github.com/ || fail 'cannot map GitHub to the bare repo'
   fx_git -C "$fx_clone" checkout -q --detach "$fx_old" || fail 'cannot detach the clone'
   fx_new=$(fx_commit second)
 }
@@ -73,11 +79,16 @@ fx_unique_commit() {
   fx_git -C "$UG_TMPDIR/seed" commit-tree -p "$parent" -m "$name" "$tree" || fail "cannot make the side commit $name"
 }
 
+fx_run_start() {
+  (cd "${1:-$fx_clone}" && /bin/bash "$UG_TMPDIR/agent-start") >"$UG_TMPDIR/start.out" 2>&1 ||
+    fail "agent-start exited non-zero: $(cat "$UG_TMPDIR/start.out")"
+}
+
+# Start agent-start in the folder $1 (default: the main checkout) and wait for its background sync.
 fx_start() {
   local before= line pid i
   [[ -f $fx_clone/.git/ug-fetch.pid ]] && read -r before <"$fx_clone/.git/ug-fetch.pid"
-  UG_REPO=$fx_repo UG_NOTICES= /bin/bash "$UG_TMPDIR/agent-start" >"$UG_TMPDIR/start.out" 2>&1 ||
-    fail "agent-start exited non-zero: $(cat "$UG_TMPDIR/start.out")"
+  fx_run_start "$@"
   for ((i = 0; i < 300; i++)); do
     line=
     [[ -f $fx_clone/.git/ug-fetch.pid ]] && read -r line <"$fx_clone/.git/ug-fetch.pid"
@@ -104,7 +115,7 @@ t_7_1() {
 t_7_2() {
   fetch_fixture
   fx_git -C "$fx_clone" fetch -q origin || fail 'cannot prefetch the second commit'
-  fx_git -C "$fx_clone" remote set-url origin "$UG_TMPDIR/no-such-origin.git"
+  mv "$fx_origin" "$fx_origin.away" || fail 'cannot hide the origin'
   fx_start
   assert_eq failed "$(fx_status | cut -d' ' -f1)" 'a fetch from a missing origin has status failed'
   assert_eq "$fx_old" "$(fx_head)" 'HEAD stays put after a failed fetch'
@@ -115,7 +126,7 @@ t_7_2() {
   assert_eq 1 "$(printf '%s\n' "$notices" | wc -l | tr -d ' ')" 'the next start shows exactly one warning'
   assert_contains "the last background fetch of $fx_repo failed: " "$notices" 'the warning names the failed fetch'
   assert_eq "$fx_old" "$(fx_head)" 'HEAD stays put after the second failed fetch'
-  fx_git -C "$fx_clone" remote set-url origin "$fx_origin"
+  mv "$fx_origin.away" "$fx_origin" || fail 'cannot restore the origin'
   fx_start
   assert_eq ok "$(fx_status | cut -d' ' -f1)" 'the same clone with its real origin fetches ok'
   assert_eq "$fx_new" "$(fx_head)" 'the same clone with its real origin moves HEAD'
@@ -151,13 +162,12 @@ t_7_4() {
   mid=$(fx_commit 'add file')
   fx_git -C "$fx_clone" fetch -q origin || fail 'cannot fetch the file commit'
   fx_git -C "$fx_clone" checkout -q --detach "$mid" || fail 'cannot detach the clone at the file commit'
-  fx_new=$(fx_commit third)
-  printf 'staged\n' >"$fx_clone/file"
-  fx_git -C "$fx_clone" add file || fail 'cannot stage the change in the clone'
-  printf 'live\n' >"$fx_clone/file"
-  [[ -n $(fx_git -C "$fx_clone" status --porcelain) ]] || fail 'the clone does not start dirty'
+  printf 'two\n' >"$UG_TMPDIR/seed/file"
+  fx_git -C "$UG_TMPDIR/seed" add file || fail 'cannot stage the new file in the seed'
+  fx_new=$(fx_commit 'change file')
   fx_start
   assert_eq "$fx_new" "$(fx_head)" 'HEAD moves to the commit pushed to origin'
+  assert_eq two "$(cat "$fx_clone/file")" 'the file holds its content at the new HEAD'
   assert_eq '' "$(fx_git -C "$fx_clone" status --porcelain)" 'the index and files match the new HEAD'
 }
 
@@ -243,4 +253,79 @@ t_7_9() {
   fx_age "$fx_clone/.git/logs/refs/remotes/origin/opened"
   fx_start
   assert_eq yes "$(fx_has_ref "$fx_origin" refs/heads/opened && echo yes || echo no)" 'the head branch of an open pull request stays on origin, even when its tip is in origin/main'
+}
+
+# Poll briefly so that a background sync started by mistake is seen.
+fx_assert_no_sync() {
+  local i
+  for ((i = 0; i < 30; i++)); do
+    [[ ! -e $fx_clone/.git/ug-fetch.pid ]] || fail "$1"
+    sleep 0.1
+  done
+}
+
+t_7_10() {
+  fetch_fixture
+  fx_worktree feat "$fx_old"
+  mkdir -p "$UG_TMPDIR/feat/sub" || fail 'cannot make a folder in the worktree'
+  fx_start "$UG_TMPDIR/feat/sub"
+  assert_eq "$fx_new" "$(fx_head)" 'a start in a linked worktree moves the main checkout of its clone'
+  assert_eq ok "$(fx_status | cut -d' ' -f1)" 'the fetch status of the clone is ok'
+  assert_eq "$UG_TMPDIR/feat/sub" "$(cat "$UG_TMPDIR/omp.cwd")" 'omp starts in the folder where agent-start started'
+  assert_eq "$fx_old" "$(fx_git -C "$UG_TMPDIR/feat" rev-parse HEAD)" 'the worktree itself does not move'
+}
+
+t_7_11() {
+  fetch_fixture
+  fx_git -C "$fx_clone" remote set-url origin "https://gitlab.com/$fx_repo.git" || fail 'cannot set the GitLab origin'
+  # git could fetch the GitLab origin, so only the origin check stops the sync.
+  fx_git -C "$fx_clone" config --add "url.$UG_TMPDIR/gh/.insteadOf" https://gitlab.com/ || fail 'cannot map GitLab to the bare repo'
+  fx_run_start
+  fx_assert_no_sync 'a clone with a non-GitHub origin starts a background sync'
+  assert_eq "$fx_old" "$(fx_head)" 'a clone with a non-GitHub origin does not move'
+  assert_eq "$fx_clone" "$(cat "$UG_TMPDIR/omp.cwd")" 'omp still starts in the clone'
+  assert_eq '' "$(cat "$UG_TMPDIR/notices")" 'a clone that does not sync gives no notice'
+}
+
+t_7_12() {
+  local mid notices
+  fetch_fixture
+  printf 'one\n' >"$UG_TMPDIR/seed/file"
+  fx_git -C "$UG_TMPDIR/seed" add file || fail 'cannot stage the file in the seed'
+  mid=$(fx_commit 'add file')
+  fx_git -C "$fx_clone" fetch -q origin || fail 'cannot fetch the file commit'
+  fx_git -C "$fx_clone" checkout -q -B main "$mid" || fail 'cannot put main of the clone at the file commit'
+  fx_new=$(fx_commit third)
+  printf 'mine\n' >"$fx_clone/file"
+  fx_start
+  assert_eq ok "$(fx_status | cut -d' ' -f1)" 'the fetch status is ok'
+  assert_eq "$mid" "$(fx_head)" 'a main checkout with a tracked change does not move'
+  assert_eq mine "$(cat "$fx_clone/file")" 'the tracked change stays'
+  fx_start
+  notices=$(cat "$UG_TMPDIR/notices")
+  assert_eq "the main checkout of $fx_repo has uncommitted changes, so it did not move to origin/main" "$notices" \
+    'the next start says why the main checkout did not move'
+  fx_git -C "$fx_clone" checkout -q -- file || fail 'cannot drop the tracked change'
+  printf 'scratch\n' >"$fx_clone/untracked"
+  fx_start
+  assert_eq "$fx_new" "$(fx_head)" 'the same checkout with only an untracked file moves'
+  assert_eq scratch "$(cat "$fx_clone/untracked")" 'the untracked file stays'
+  assert_eq no "$([[ -e $fx_clone/.git/ug-reset.summary ]] && echo yes || echo no)" 'a checkout that moved leaves no reset notice'
+}
+
+t_7_13() {
+  local notices
+  fetch_fixture
+  fx_git -C "$fx_clone" checkout -q -b topic "$fx_old" || fail 'cannot make the topic branch'
+  fx_start
+  assert_eq "$fx_old" "$(fx_head)" 'a main checkout on another branch does not move'
+  assert_eq "$fx_old" "$(fx_git -C "$fx_clone" rev-parse refs/heads/topic)" 'the other branch keeps its commit'
+  fx_start
+  notices=$(cat "$UG_TMPDIR/notices")
+  assert_eq "the main checkout of $fx_repo is on the branch topic, so it did not move to origin/main" "$notices" \
+    'the next start says why the main checkout did not move'
+  fx_git -C "$fx_clone" checkout -q main || fail 'cannot check out main'
+  fx_start
+  assert_eq "$fx_new" "$(fx_head)" 'the same checkout on the default branch moves'
+  assert_eq "$fx_new" "$(fx_git -C "$fx_clone" rev-parse refs/heads/main)" 'the default branch moves with it'
 }

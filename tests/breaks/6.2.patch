@@ -1,0 +1,12 @@
+diff --git a/host/bin/ug-sync b/host/bin/ug-sync
+--- a/host/bin/ug-sync
++++ b/host/bin/ug-sync
+@@ -20,7 +20,7 @@
+ 
+ if [[ ! -f $sources ]]; then
+   log "no $sources; run host/bin/ug-setup"
+-  exit 1
++  exit 0
+ fi
+ 
+ status=0
