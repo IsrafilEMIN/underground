@@ -7,10 +7,10 @@ description: Drive the Underground host scripts (ug-backup, ug-sync, and the age
 
 Underground is a macOS host kit, not a server. Its users touch command-line tools:
 
-- The **owner** (an admin account) runs `host/bin/ug-setup` once. He then adds the remote host `ugagent@127.0.0.1:18376` in his Tern app and types `omp` in that shell to start an agent session. launchd runs `host/bin/ug-backup` daily and `host/bin/ug-sync` every 5 minutes as the owner. `host/bin/ug-auth` manages model credentials.
+- The **owner** (an admin account) runs `host/bin/ug-setup` once. He then adds the remote host `ugagent@127.0.0.1:18376` in his Tern app (on his phone, `ugagent@<mac tailscale ip>:18376`, with the phone's key in `host/tern-keys`) and types `omp` in that shell to start an agent session. launchd runs `host/bin/ug-backup` daily and `host/bin/ug-sync` every 5 minutes as the owner. `host/bin/ug-auth` manages model credentials.
 - The **agent** (user `ugagent`) gets its shell from the `com.underground.agent-tern` daemon (`code/agent-tern`, `tern remote serve --user`). Its zsh files (`code/zsh`) load `code/agent-env` and put `code/session-bin` first, so `omp` is `code/session-bin/omp` → `code/agent-start` → omp, with warning notices, in the folder where it was typed. launchd runs `code/agent-dream` nightly. `code/bin/agent-check` reports missing omp settings, agent-config files and skills.
 
-The real install is one per machine (users `ugagent`/`ugauth`, `/Library/Underground`, system LaunchDaemons, Tern on UDP 18376). It cannot run twice, and it belongs to the user. **Never drive it**: do not run `ug-setup`, `ug-agent-setup`, `ug-auth`, `ug-sync` or `sudo` against it, and do not run host scripts with your real `HOME`. Verify in a stand-in instead.
+The real install is one per machine (users `ugagent`/`ugauth`, `/Library/Underground`, system LaunchDaemons, Tern on UDP 18376, which `code/pf.conf` opens to loopback and the tailnet only). It cannot run twice, and it belongs to the user. **Never drive it**: do not run `ug-setup`, `ug-agent-setup`, `ug-auth`, `ug-sync` or `sudo` against it, and do not run host scripts with your real `HOME`. Verify in a stand-in instead.
 
 ## How the stand-in works
 
@@ -21,7 +21,7 @@ The real install is one per machine (users `ugagent`/`ugauth`, `/Library/Undergr
 | `src/` | copy of this worktree's `host/` and `VERSIONS`, including uncommitted edits; `src/host/facts` points `root`, `agent_home`, `auth_home` into the base and every port at 9 |
 | `root/code/` | `host/agent/*` rendered with the repo's own `ug_render` and laid out like the agent code step of `host/bin/ug-agent-setup` (`agent-start`, `agent-env`, `agent-dream`, `agent-tern` (rendered, never run), `requirements`, `ug-notices.ts`, `session-bin/omp` → `agent-start`, `zsh/{.zshenv,.zprofile,.zshrc}`, `authorized_keys/ugagent`, `bin/{omp,gh,agent-check,agent-home-tar,agent-unpack}`; no `bin/tern`) |
 | `root/gateway-token`, `root/logs/`, `root/status/` | what `agent-env` and `agent-start` read; `ug-backup` writes `status/backup-last` |
-| `owner-home/` (mode 700) | owner `HOME`; `.ssh/id_ed25519` (its public key is in `root/code/authorized_keys/ugagent`, as setup copies it for Tern); `.local/share/underground/` holds an empty `sources`, `backup/{password,config}` and the pinned restic path |
+| `owner-home/` (mode 700) | owner `HOME`; `.ssh/id_ed25519` (its public key and the keys in `host/tern-keys` are in `root/code/authorized_keys/ugagent`, as setup copies them for Tern); `.local/share/underground/` holds an empty `sources`, `backup/{password,config}` and the pinned restic path |
 | `agent-home/` (mode 700) | the agent `HOME`; `.omp/agent/` has placeholder files for the `file` lines of `host/requirements` and a placeholder `skills/<name>/SKILL.md` for each `skill <name>` line (scaffolding); `.gitconfig` rewrites `https://github.com/` to `origins/`, so the background sync of a `ugv repo` clone stays offline |
 | `stubs/` | first on the owner `PATH` (see below) |
 | `calls/<stub>.log` | every stub call: time, cwd, argv, notes |

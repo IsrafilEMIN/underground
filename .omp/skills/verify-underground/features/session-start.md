@@ -22,7 +22,7 @@ The owner opens the agent's shell in his Tern app (remote host `ugagent@127.0.0.
 
 ## How to get to it (user POV)
 
-- The owner adds the remote host `ugagent@127.0.0.1:18376` in Tern (once; `host/bin/ug-setup` trusts its host key), opens its shell, `cd`s to a folder and types `omp [ARGS...]`.
+- The owner adds the remote host `ugagent@127.0.0.1:18376` in Tern (once; `host/bin/ug-setup` trusts its host key), or `ugagent@<mac tailscale ip>:18376` on his phone, opens its shell, `cd`s to a folder and types `omp [ARGS...]`.
 - In the stand-in, play the Tern shell as the agent: `$U agent "$RUN" --cwd <folder under $B> -- code/session-bin/omp [ARGS...]`. For the zsh path itself, run `/bin/zsh -i -c 'omp ...'` with `ZDOTDIR` set to the stand-in's `root/code/zsh`, as `code/agent-tern` sets it.
 
 ## Driving it with ugv

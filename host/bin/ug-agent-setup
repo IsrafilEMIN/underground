@@ -286,7 +286,7 @@ install -m 444 -o root -g wheel "$src/host/agent/zsh/zprofile" "$code.new/zsh/.z
 install -m 444 -o root -g wheel "$rendered_dir/zshrc" "$code.new/zsh/.zshrc"
 tern_keys=$code.new/authorized_keys/$agent_user
 : >"$tern_keys"
-for pub in "$owner_home"/.ssh/id_*.pub; do
+for pub in "$owner_home"/.ssh/id_*.pub "$src/host/tern-keys"; do
   [[ -f $pub && ! -L $pub ]] || continue
   awk '$1 == "ssh-ed25519" || $1 == "ssh-rsa" || $1 ~ /^ecdsa-sha2-nistp(256|384|521)$/ { print $1, $2 }' "$pub" >>"$tern_keys"
 done
@@ -300,7 +300,7 @@ ug_say ok "agent code" "rebuilt in $code"
 if [[ $tern_key_count -eq 0 ]]; then
   ug_say warn "tern keys" "no ed25519, ecdsa or rsa key in $owner_home/.ssh/id_*.pub, so Tern cannot log in as $agent_user; run: ssh-keygen -t ed25519, then host/bin/ug-setup"
 else
-  ug_say ok "tern keys" "$tern_key_count keys from $owner_home/.ssh in $code/authorized_keys/$agent_user"
+  ug_say ok "tern keys" "$tern_key_count keys from $owner_home/.ssh and host/tern-keys in $code/authorized_keys/$agent_user"
 fi
 
 sudoers_tmp=$(mktemp) || ug_die ug-agent-setup "cannot make a temp file for the sudoers rules"
