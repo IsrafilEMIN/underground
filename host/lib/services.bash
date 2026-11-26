@@ -26,6 +26,7 @@ ug_service_probe() {
     *:http) ug_probe=(ug_http_answers "$target") ;;
     *:port) ug_probe=(ug_port_answers "${target%:*}" "${target##*:}") ;;
     *:launchd) ug_probe=(launchctl print "$domain/$label") ;;
+    daemon:udp) ug_probe=(ug_udp_held "$target") ;;
     daemon:pf)
       agent=$(ug_fact agent_user) || return 1
       ug_probe=(ug_pf_refuses_listener "$(id -u "$agent")" "$target")
@@ -77,6 +78,8 @@ ug_wait() {
 ug_http_answers() { curl -fsS -o /dev/null --max-time 1 "$1"; }
 
 ug_port_answers() { nc -z -w 1 "$1" "$2"; }
+
+ug_udp_held() { lsof -nP -t -iUDP@"$1" >/dev/null; }
 
 ug_sshd_denies_agent() {
   local agent
