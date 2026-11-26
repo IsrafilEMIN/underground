@@ -267,7 +267,7 @@ sync_sources() {
 }
 
 setup_tern() {
-  local tern=/Applications/Tern.app/Contents/MacOS/tern agent_user agent_home port line addr='' fp='' extra='' out how ts_ip
+  local tern=/Applications/Tern.app/Contents/MacOS/tern agent_user agent_home port line addr='' fp='' extra='' out how ts_ip host
   agent_user=$(ug_fact agent_user)
   agent_home=$(ug_fact agent_home)
   port=$(ug_fact agent_tern_port)
@@ -278,27 +278,25 @@ setup_tern() {
     port=${addr#*:}
   else
     ug_say warn tern "$data/tern-host is missing or is not one line of 127.0.0.1:<port> SHA256:<fingerprint>; run host/bin/ug-setup again"
-    addr='' fp=''
+    fp=''
   fi
+  # The mac and the phone both reach the mac's Tailscale address, so one host works on every Tern device.
+  ts_ip=$(ifconfig | awk '$1 == "inet" && $2 ~ /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./ { print $2; exit }')
+  host=${ts_ip:-127.0.0.1}:$port
+  [[ -n $ts_ip ]] || ug_say warn tern "this mac has no Tailscale address, so only this mac reaches the agent's Tern host at $host; turn on Tailscale, then run host/bin/ug-setup again"
   if [[ -z $fp ]]; then
     how="setup cannot read its host key from $data/tern-host, so run host/bin/ug-setup again and trust the key it reports"
   elif [[ ! -x $tern ]]; then
     ug_say warn tern "$tern is missing; install Tern in /Applications"
-    how="its host key is not trusted yet; install Tern in /Applications, then run: $tern remote trust $addr $fp"
-  elif out=$("$tern" remote trust "$addr" "$fp" 2>&1); then
-    ug_say ok tern "trusted the agent host key $fp for $addr"
-    how="its host key $fp is already trusted"
+    how="its host key is not trusted yet; install Tern in /Applications, then run: $tern remote trust $host $fp"
+  elif out=$("$tern" remote trust "$host" "$fp" 2>&1); then
+    ug_say ok tern "trusted the agent host key $fp for $host"
+    how="its host key $fp is already trusted on this mac; on the phone, check that it is $fp"
   else
-    ug_say warn tern "tern remote trust $addr $fp failed: ${out//$'\n'/ }"
-    how="its host key is not trusted yet; run: $tern remote trust $addr $fp"
+    ug_say warn tern "tern remote trust $host $fp failed: ${out//$'\n'/ }"
+    how="its host key is not trusted yet; run: $tern remote trust $host $fp"
   fi
-  later+=("open Tern, choose Add remote host, and enter $agent_user@127.0.0.1:$port; $how. typing omp in that shell starts the agent in the current folder; repos live in $agent_home/work/<owner>/<name> there")
-  ts_ip=$(ifconfig | awk '$1 == "inet" && $2 ~ /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./ { print $2; exit }')
-  if [[ -n $ts_ip ]]; then
-    later+=("on your phone, add the Tern remote host $agent_user@$ts_ip:$port over Tailscale${fp:+ and check that its host key is $fp}; the agent accepts the phone keys in host/tern-keys")
-  else
-    later+=("this mac has no Tailscale address, so your phone cannot reach the agent's Tern host; turn on Tailscale, then run host/bin/ug-setup again")
-  fi
+  later+=("open Tern, choose Add remote host, and enter $agent_user@$host (replace an older $agent_user@127.0.0.1:$port host); $how. typing omp in that shell starts the agent in the current folder; repos live in $agent_home/work/<owner>/<name> there; the agent accepts the phone keys in host/tern-keys")
   compgen -G "$HOME/.ssh/id_*.pub" >/dev/null ||
     later+=("you have no ssh key in $HOME/.ssh, so Tern cannot log in to the agent; run ssh-keygen -t ed25519, then run host/bin/ug-setup again")
 }
